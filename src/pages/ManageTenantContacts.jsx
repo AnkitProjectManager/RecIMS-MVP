@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useToast } from "@/components/ui/use-toast";
 import { 
   ArrowLeft, 
   Plus, 
@@ -33,6 +34,7 @@ import { useTenant } from "@/components/TenantContext";
 export default function ManageTenantContacts() {
   const queryClient = useQueryClient();
   const { user } = useTenant();
+  const { toast } = useToast();
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -131,14 +133,35 @@ export default function ManageTenantContacts() {
 
   const deleteContactMutation = useMutation({
     mutationFn: async (id) => {
-      return await recims.entities.TenantContact.update(id, { is_active: false });
+      await recims.entities.TenantContact.delete(id);
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['tenantContacts'] });
-      setSuccess("Contact deleted successfully");
-      setTimeout(() => setSuccess(null), 3000);
+      toast({
+        title: 'Contact deleted',
+        description: `Contact #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the contact.',
+        variant: 'destructive',
+      });
     },
   });
+
+  const handleDeleteContact = async (contact) => {
+    if (!contact?.id) return;
+    const confirmed = window.confirm(`Delete ${contact.contact_name || contact.contact_email}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteContactMutation.mutateAsync(contact.id);
+    } catch (error) {
+      // toast already surfaced failure
+    }
+  };
 
   const handleEdit = (contact) => {
     setEditingContact(contact);
@@ -384,8 +407,9 @@ export default function ManageTenantContacts() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => deleteContactMutation.mutate(contact.id)}
+                              onClick={() => handleDeleteContact(contact)}
                               className="text-red-600 hover:text-red-700"
+                              disabled={deleteContactMutation.isPending && deleteContactMutation.variables === contact.id}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>

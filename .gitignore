@@ -18,6 +18,8 @@ recims.db
 .env.local
 *.local
 
+public/uploads/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

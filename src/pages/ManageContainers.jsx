@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import { 
   ArrowLeft, 
   Plus, 
@@ -40,6 +41,7 @@ const CONTAINER_TYPES = [
 export default function ManageContainers() {
   const queryClient = useQueryClient();
   const { user } = useTenant();
+  const { toast } = useToast();
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -97,14 +99,35 @@ export default function ManageContainers() {
 
   const deleteContainerMutation = useMutation({
     mutationFn: async (id) => {
-      return await recims.entities.Container.update(id, { status: 'inactive' });
+      await recims.entities.Container.delete(id);
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['containers'] });
-      setSuccess("Container deactivated successfully");
-      setTimeout(() => setSuccess(null), 3000);
+      toast({
+        title: 'Container deleted',
+        description: `Container #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the container.',
+        variant: 'destructive',
+      });
     },
   });
+
+  const handleDeleteContainer = async (container) => {
+    if (!container?.id) return;
+    const confirmed = window.confirm(`Delete ${container.container_code || container.container_name}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteContainerMutation.mutateAsync(container.id);
+    } catch (error) {
+      // toast already reports failure
+    }
+  };
 
   const handleLoadTemplate = (template) => {
     setFormData({
@@ -325,7 +348,8 @@ export default function ManageContainers() {
                       <Button
                         variant="outline"
                         size="icon"
-                        onClick={() => deleteContainerMutation.mutate(container.id)}
+                        onClick={() => handleDeleteContainer(container)}
+                        disabled={deleteContainerMutation.isPending && deleteContainerMutation.variables === container.id}
                       >
                         <Trash2 className="w-4 h-4 text-red-600" />
                       </Button>

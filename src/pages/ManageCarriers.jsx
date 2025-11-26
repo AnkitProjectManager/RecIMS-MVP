@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/components/ui/use-toast";
 import {
   ArrowLeft,
   Plus,
@@ -31,7 +32,8 @@ import {
   Building2,
   Globe,
   User,
-  Package
+  Package,
+  Trash2
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -68,6 +70,7 @@ const SERVICE_TYPES = [
 export default function ManageCarriers() {
   const queryClient = useQueryClient();
   const { tenantConfig, user } = useTenant();
+  const { toast } = useToast();
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -156,6 +159,38 @@ export default function ManageCarriers() {
       setTimeout(() => setError(null), 3000);
     }
   });
+
+  const deleteCarrierMutation = useMutation({
+    mutationFn: async (id) => {
+      await recims.entities.Carrier.delete(id);
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['carriers'] });
+      toast({
+        title: 'Carrier deleted',
+        description: `Carrier #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the carrier.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleDeleteCarrier = async (carrier) => {
+    if (!carrier?.id) return;
+    const confirmed = window.confirm(`Delete ${carrier.company_name || carrier.carrier_code}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteCarrierMutation.mutateAsync(carrier.id);
+    } catch (error) {
+      // toast handler covers error state
+    }
+  };
 
   const handleEdit = (carrier) => {
     console.log('Editing carrier:', carrier);
@@ -590,6 +625,16 @@ export default function ManageCarriers() {
                         >
                           <Power className="w-3 h-3" />
                           {carrier.status === 'active' ? 'Deactivate' : 'Activate'}
+                        </Button>
+                        <Button
+                          onClick={() => handleDeleteCarrier(carrier)}
+                          variant="destructive"
+                          size="sm"
+                          className="gap-2"
+                          disabled={deleteCarrierMutation.isPending && deleteCarrierMutation.variables === carrier.id}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Delete
                         </Button>
                       </div>
                     </CardContent>

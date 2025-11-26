@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { recims } from "@/api/recimsClient";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import { 
   Users, 
   ArrowLeft, 
@@ -18,13 +19,16 @@ import {
   Mail,
   Building2,
   DollarSign,
-  FileText
+  FileText,
+  Trash2
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function VendorManagement() {
   const navigate = useNavigate();
   const { user } = useTenant();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [countryFilter, setCountryFilter] = useState('all');
@@ -40,6 +44,38 @@ export default function VendorManagement() {
     enabled: !!user?.tenant_id,
     initialData: [],
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+      await recims.entities.Vendor.delete(id);
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['vendors', user?.tenant_id] });
+      toast({
+        title: 'Vendor deleted',
+        description: `Vendor #${deletedId} has been removed.`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Could not delete the vendor.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleDelete = async (vendor) => {
+    if (!vendor?.id) return;
+    const confirmed = window.confirm(`Delete ${vendor.display_name || 'this vendor'}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteMutation.mutateAsync(vendor.id);
+    } catch (error) {
+      // toast handler covers error state
+    }
+  };
 
   const filteredVendors = vendors.filter(vendor => {
     const matchesSearch = 
@@ -268,6 +304,19 @@ export default function VendorManagement() {
                         Total Paid: ${vendor.total_paid.toFixed(2)}
                       </p>
                     )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="gap-2"
+                      disabled={deleteMutation.isPending && deleteMutation.variables === vendor.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDelete(vendor);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </Button>
                   </div>
                 </div>
               </CardContent>

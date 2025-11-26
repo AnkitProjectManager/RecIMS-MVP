@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { 
@@ -111,6 +112,7 @@ export default function ManageQCCriteria() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { tenantConfig, user } = useTenant();
+  const { toast } = useToast();
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -175,14 +177,35 @@ export default function ManageQCCriteria() {
 
   const deleteCriteriaMutation = useMutation({
     mutationFn: async (id) => {
-      return await recims.entities.QCCriteria.update(id, { status: 'inactive' });
+      await recims.entities.QCCriteria.delete(id);
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['qcCriteria'] });
-      setSuccess("Criteria deactivated successfully");
-      setTimeout(() => setSuccess(null), 3000);
+      toast({
+        title: 'Criteria deleted',
+        description: `Criterion #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the criteria.',
+        variant: 'destructive',
+      });
     },
   });
+
+  const handleDeleteCriteria = async (criterion) => {
+    if (!criterion?.id) return;
+    const confirmed = window.confirm(`Delete ${criterion.criteria_name || 'this criterion'}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteCriteriaMutation.mutateAsync(criterion.id);
+    } catch (error) {
+      // toast already reports errors
+    }
+  };
 
   const handleEdit = (criterion) => {
     setEditingCriteria(criterion);
@@ -521,13 +544,14 @@ export default function ManageQCCriteria() {
                       >
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => deleteCriteriaMutation.mutate(criterion.id)}
-                      >
-                        <Trash2 className="w-4 h-4 text-red-600" />
-                      </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleDeleteCriteria(criterion)}
+                          disabled={deleteCriteriaMutation.isPending && deleteCriteriaMutation.variables === criterion.id}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </Button>
                     </div>
                   </div>
                 </div>

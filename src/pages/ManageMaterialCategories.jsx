@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import { 
   ArrowLeft, 
   Plus, 
@@ -15,7 +16,8 @@ import {
   Search,
   Package,
   Save,
-  X
+  X,
+  Trash2
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -30,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 export default function ManageMaterialCategories() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -83,6 +86,38 @@ export default function ManageMaterialCategories() {
       setTimeout(() => setError(null), 3000);
     }
   });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (id) => {
+      await recims.entities.MaterialCategory.delete(id);
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['materialCategories'] });
+      toast({
+        title: 'Category deleted',
+        description: `Category #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the category.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleDeleteCategory = async (category) => {
+    if (!category?.id) return;
+    const confirmed = window.confirm(`Delete ${category.category_name || 'this category'}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteCategoryMutation.mutateAsync(category.id);
+    } catch (error) {
+      // toast handles the error feedback
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -291,6 +326,16 @@ export default function ManageMaterialCategories() {
                             title="Edit Category"
                           >
                             <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-600 hover:text-red-700"
+                            onClick={() => handleDeleteCategory(category)}
+                            disabled={deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id}
+                            title="Delete Category"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                       </td>

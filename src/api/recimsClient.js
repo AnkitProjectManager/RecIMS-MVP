@@ -124,6 +124,37 @@ const auth = {
 
 // Entity API factory
 function createEntityAPI(entityName) {
+  const valuesEqual = (left, right) => {
+    if (left === right) return true;
+    if (left == null || right == null) {
+      return left == null && right == null;
+    }
+
+    if (typeof left === 'number' && typeof right === 'string') {
+      return String(left) === right;
+    }
+
+    if (typeof left === 'string' && typeof right === 'number') {
+      return left === String(right);
+    }
+
+    if (typeof left === 'boolean' && typeof right === 'string') {
+      const normalized = right.trim().toLowerCase();
+      if (normalized === 'true') return left === true;
+      if (normalized === 'false') return left === false;
+      return false;
+    }
+
+    if (typeof left === 'string' && typeof right === 'boolean') {
+      const normalized = left.trim().toLowerCase();
+      if (normalized === 'true') return right === true;
+      if (normalized === 'false') return right === false;
+      return false;
+    }
+
+    return String(left) === String(right);
+  };
+
   return {
     async list(orderBy, limit) {
       const entities = await fetchAPI(`/entities/${entityName}`);
@@ -153,7 +184,14 @@ function createEntityAPI(entityName) {
       // Apply filters client-side
       return entities.filter(entity => {
         return Object.keys(filters).every(key => {
-          return entity[key] === filters[key];
+          const filterValue = filters[key];
+          const entityValue = entity[key];
+
+          if (Array.isArray(filterValue)) {
+            return filterValue.some((candidate) => valuesEqual(entityValue, candidate));
+          }
+
+          return valuesEqual(entityValue, filterValue);
         });
       });
     },
@@ -250,11 +288,92 @@ const functions = {
 };
 
 // Integrations API (placeholder)
+const notImplemented = (feature) => {
+  console.warn(`${feature} integration not available in standalone mode`);
+  return {
+    message: `${feature} integration is not configured for this environment`,
+    success: false,
+  };
+};
+
 const integrations = {
   Core: {
-    async UploadFile({ file }) {
-      console.warn('File upload not implemented in standalone mode');
-      return { file_url: URL.createObjectURL(file) };
+    async UploadFile({ file, fileName, mimeType }) {
+      if (!file) {
+        throw new Error('File is required for upload');
+      }
+
+      let uploadBlob = file;
+      let uploadName = fileName || (typeof file === 'object' && file?.name) || 'upload';
+      let inferredMime = mimeType || (typeof file === 'object' && file?.type) || 'application/octet-stream';
+
+      if (typeof file === 'string') {
+        let base64Data = file;
+        const dataUrlMatch = /^data:(.*?);base64,(.*)$/.exec(file);
+        if (dataUrlMatch) {
+          inferredMime = dataUrlMatch[1] || inferredMime;
+          base64Data = dataUrlMatch[2];
+        }
+
+        try {
+          const binary = typeof atob === 'function'
+            ? atob(base64Data)
+            : typeof Buffer !== 'undefined'
+              ? Buffer.from(base64Data, 'base64').toString('binary')
+              : (() => { throw new Error('Base64 decoding not supported'); })();
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          uploadBlob = new Blob([bytes], { type: inferredMime });
+          if (!fileName) {
+            const guessedExt = inferredMime && inferredMime.includes('/') ? inferredMime.split('/')[1] : 'bin';
+            uploadName = `upload.${guessedExt}`;
+          }
+        } catch (decodeError) {
+          console.error('Failed to decode base64 upload payload', decodeError);
+          throw new Error('Invalid file data');
+        }
+      }
+
+      const formData = new FormData();
+      formData.append('file', uploadBlob, uploadName);
+
+      const headers = { Accept: 'application/json' };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+
+      const response = await fetch(`${API_URL}/files/upload`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload?.error || 'File upload failed';
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+
+      return payload || {};
+    },
+    async UploadPrivateFile(params) {
+      return this.UploadFile(params);
+    },
+    async CreateFileSignedUrl() {
+      return notImplemented('Signed URL');
+    },
+    async ExtractDataFromUploadedFile() {
+      return notImplemented('File extraction');
+    },
+    async GenerateImage() {
+      return notImplemented('Image generation');
+    },
+    async SendEmail() {
+      return notImplemented('Email');
     },
     async InvokeLLM(data) {
       console.warn('LLM integration not available in standalone mode');

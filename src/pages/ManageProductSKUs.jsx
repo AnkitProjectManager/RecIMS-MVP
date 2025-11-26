@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
@@ -85,6 +86,7 @@ const CTMETALS_CATEGORIES = [
 export default function ManageProductSKUs() {
   const queryClient = useQueryClient();
   const { tenantConfig, user } = useTenant();
+  const { toast } = useToast();
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -187,14 +189,36 @@ export default function ManageProductSKUs() {
 
   const deleteSKUMutation = useMutation({
     mutationFn: async (id) => {
-      return await recims.entities.ProductSKU.update(id, { status: 'inactive' });
+      await recims.entities.ProductSKU.delete(id);
+      return id;
     },
-    onSuccess: () => {
+    onSuccess: (deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['productSKUs'] });
-      setSuccess("SKU deactivated successfully");
-      setTimeout(() => setSuccess(null), 3000);
+      toast({
+        title: 'SKU deleted',
+        description: `SKU #${deletedId} has been removed.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'Could not delete the SKU.',
+        variant: 'destructive',
+      });
     },
   });
+
+  const handleDeleteSKU = async (sku) => {
+    if (!sku?.id) return;
+    const label = sku.sku_number || sku.product_type || 'this SKU';
+    const confirmed = window.confirm(`Delete ${label}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteSKUMutation.mutateAsync(sku.id);
+    } catch (error) {
+      // toast already reports failures
+    }
+  };
 
   const handleEdit = (sku) => {
     setEditingSKU(sku);
@@ -513,7 +537,8 @@ export default function ManageProductSKUs() {
                         <Button
                           variant="outline"
                           size="icon"
-                          onClick={() => deleteSKUMutation.mutate(sku.id)}
+                          onClick={() => handleDeleteSKU(sku)}
+                          disabled={deleteSKUMutation.isPending && deleteSKUMutation.variables === sku.id}
                         >
                           <Trash2 className="w-4 h-4 text-red-600" />
                         </Button>

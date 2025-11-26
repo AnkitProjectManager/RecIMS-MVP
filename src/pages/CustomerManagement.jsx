@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { recims } from "@/api/recimsClient";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import { 
   Users, 
   ArrowLeft, 
@@ -17,13 +18,16 @@ import {
   Phone,
   Mail,
   Building2,
-  DollarSign
+  DollarSign,
+  Trash2
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function CustomerManagement() {
   const navigate = useNavigate();
   const { user } = useTenant();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [countryFilter, setCountryFilter] = useState('all');
@@ -39,6 +43,38 @@ export default function CustomerManagement() {
     enabled: !!user?.tenant_id,
     initialData: [],
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => {
+      await recims.entities.Customer.delete(id);
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.tenant_id] });
+      toast({
+        title: 'Customer deleted',
+        description: `Customer #${deletedId} has been removed.`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Could not delete the customer.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleDelete = async (customer) => {
+    if (!customer?.id) return;
+    const confirmed = window.confirm(`Delete ${customer.display_name || 'this customer'}? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteMutation.mutateAsync(customer.id);
+    } catch (error) {
+      // toast handler covers error state
+    }
+  };
 
   const filteredCustomers = customers.filter(customer => {
     const matchesSearch = 
@@ -253,6 +289,19 @@ export default function CustomerManagement() {
                         Total: ${customer.total_purchases.toFixed(2)}
                       </p>
                     )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="gap-2"
+                      disabled={deleteMutation.isPending && deleteMutation.variables === customer.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDelete(customer);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </Button>
                   </div>
                 </div>
               </CardContent>
