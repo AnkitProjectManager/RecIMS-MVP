@@ -1,4 +1,4 @@
-const { init } = require('../../../lib/db')
+const { init } = require('../../../lib/persistence')
 const jwt = require('jsonwebtoken')
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this'
@@ -89,10 +89,18 @@ function resolveTableName(normalizedSlug) {
   return ENTITY_TABLE_ALIAS[normalizedSlug] || ENTITY_TABLE_ALIAS[compactKey] || normalizedSlug
 }
 
-function tableExists(db, tableName) {
+async function tableExists(db, tableName) {
   if (!tableName) return false
+  if (db.dialect === 'postgres') {
+    const stmt = db.prepare(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ? LIMIT 1"
+    )
+    const row = await stmt.get(tableName)
+    return Boolean(row)
+  }
   const stmt = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1")
-  return Boolean(stmt.get(tableName))
+  const row = await stmt.get(tableName)
+  return Boolean(row)
 }
 
 function safeParseJSON(value, fallback) {
@@ -427,8 +435,8 @@ function prepareGenericData(input, actorTenantId) {
   return output
 }
 
-export default function handler(req, res) {
-  const db = init()
+export default async function handler(req, res) {
+  const db = await init()
   const decoded = verifyToken(req)
   if (!decoded) return res.status(401).json({ error: 'Unauthorized' })
 
@@ -450,36 +458,38 @@ export default function handler(req, res) {
       return res.status(400).json({ error: 'Invalid entity name' })
     }
 
-    const tableAvailable = tableExists(db, entityName)
+  const tableAvailable = await tableExists(db, entityName)
 
     if (req.method === 'GET' && !id) {
       if (!tableAvailable) {
         const tenantFilter = normalizeTenantId(decoded.tenant_id)
         const stmt = isSuperAdmin
-          ? db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? ORDER BY datetime(created_date) DESC, id DESC`)
-          : db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY datetime(created_date) DESC, id DESC`)
-        const rows = isSuperAdmin ? stmt.all(normalizedSlug) : stmt.all(normalizedSlug, tenantFilter)
+          ? db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? ORDER BY created_date DESC, id DESC`)
+          : db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY created_date DESC, id DESC`)
+        const rows = isSuperAdmin
+          ? await stmt.all(normalizedSlug)
+          : await stmt.all(normalizedSlug, tenantFilter)
         return res.json(rows.map(decodeGenericEntityRow))
       }
       if (entityName === TENANT_TABLE) {
         const stmt = isSuperAdmin
-          ? db.prepare(`SELECT * FROM ${TENANT_TABLE} ORDER BY datetime(created_date) DESC, id DESC`)
-          : db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE tenant_id = ? OR tenant_id IS NULL ORDER BY datetime(created_date) DESC, id DESC`)
-        const rows = isSuperAdmin ? stmt.all() : stmt.all(decoded.tenant_id)
+          ? db.prepare(`SELECT * FROM ${TENANT_TABLE} ORDER BY created_date DESC, id DESC`)
+          : db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE tenant_id = ? OR tenant_id IS NULL ORDER BY created_date DESC, id DESC`)
+        const rows = isSuperAdmin ? await stmt.all() : await stmt.all(decoded.tenant_id)
         return res.json(rows.map(decodeTenantRow))
       }
 
       if (entityName === TENANT_CATEGORY_TABLE || entityName === TENANT_CONTACT_TABLE) {
         const decoder = entityName === TENANT_CATEGORY_TABLE ? decodeTenantCategoryRow : decodeTenantContactRow
         const stmt = isSuperAdmin
-          ? db.prepare(`SELECT * FROM ${entityName} ORDER BY datetime(created_date) DESC, id DESC`)
-          : db.prepare(`SELECT * FROM ${entityName} WHERE tenant_id = ? OR tenant_id IS NULL ORDER BY datetime(created_date) DESC, id DESC`)
-        const rows = isSuperAdmin ? stmt.all() : stmt.all(decoded.tenant_id)
+          ? db.prepare(`SELECT * FROM ${entityName} ORDER BY created_date DESC, id DESC`)
+          : db.prepare(`SELECT * FROM ${entityName} WHERE tenant_id = ? OR tenant_id IS NULL ORDER BY created_date DESC, id DESC`)
+        const rows = isSuperAdmin ? await stmt.all() : await stmt.all(decoded.tenant_id)
         return res.json(rows.map(decoder))
       }
 
       const stmt = db.prepare(`SELECT * FROM ${entityName} WHERE tenant_id = ? OR tenant_id IS NULL`)
-      const rows = stmt.all(decoded.tenant_id)
+      const rows = await stmt.all(decoded.tenant_id)
       return res.json(rows)
     }
 
@@ -489,12 +499,14 @@ export default function handler(req, res) {
         const stmt = isSuperAdmin
           ? db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
           : db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ? AND (tenant_id = ? OR tenant_id IS NULL)`)
-        const row = isSuperAdmin ? stmt.get(id, normalizedSlug) : stmt.get(id, normalizedSlug, tenantFilter)
+        const row = isSuperAdmin
+          ? await stmt.get(id, normalizedSlug)
+          : await stmt.get(id, normalizedSlug, tenantFilter)
         if (!row) return res.status(404).json({ error: 'Not found' })
         return res.json(decodeGenericEntityRow(row))
       }
       const stmt = db.prepare(`SELECT * FROM ${entityName} WHERE id = ?`)
-      const row = stmt.get(id)
+      const row = await stmt.get(id)
       if (!row) return res.status(404).json({ error: 'Not found' })
       if (entityName === TENANT_TABLE) {
         return res.json(decodeTenantRow(row))
@@ -521,8 +533,8 @@ export default function handler(req, res) {
           baseData.updated_date = timestamp
         }
         const stmt = db.prepare(`INSERT INTO ${GENERIC_ENTITY_TABLE} (entity_name, tenant_id, payload_json) VALUES (?, ?, ?)`)
-        const result = stmt.run(normalizedSlug, tenantForRecord || null, JSON.stringify(baseData))
-        const created = db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
+        const result = await stmt.run(normalizedSlug, tenantForRecord || null, JSON.stringify(baseData))
+        const created = await db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
         return res.status(201).json(decodeGenericEntityRow(created))
       }
       let data
@@ -547,20 +559,20 @@ export default function handler(req, res) {
       const values = Object.values(data)
       const placeholders = keys.map(() => '?').join(', ')
       const stmt = db.prepare(`INSERT INTO ${entityName} (${keys.join(',')}) VALUES (${placeholders})`)
-      const result = stmt.run(...values)
+      const result = await stmt.run(...values)
 
       if (entityName === TENANT_TABLE) {
-        const created = db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
+        const created = await db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
         return res.status(201).json(decodeTenantRow(created))
       }
 
       if (entityName === TENANT_CATEGORY_TABLE) {
-        const created = db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
+        const created = await db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
         return res.status(201).json(decodeTenantCategoryRow(created))
       }
 
       if (entityName === TENANT_CONTACT_TABLE) {
-        const created = db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
+        const created = await db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
         return res.status(201).json(decodeTenantContactRow(created))
       }
 
@@ -569,7 +581,7 @@ export default function handler(req, res) {
 
     if (req.method === 'PUT' && id) {
       if (!tableAvailable) {
-        const existingRow = db
+        const existingRow = await db
           .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
           .get(id, normalizedSlug)
         if (!existingRow) {
@@ -596,13 +608,13 @@ export default function handler(req, res) {
           mergedPayload.created_date = existingPayload.created_date || updatedTimestamp
         }
 
-        db.prepare(
+        await db.prepare(
           `UPDATE ${GENERIC_ENTITY_TABLE}
              SET tenant_id = ?, payload_json = ?, updated_date = ?
            WHERE id = ? AND entity_name = ?`
         ).run(tenantForRecord || null, JSON.stringify(mergedPayload), updatedTimestamp, id, normalizedSlug)
 
-        const updatedRow = db
+        const updatedRow = await db
           .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
           .get(id, normalizedSlug)
         return res.json(decodeGenericEntityRow(updatedRow))
@@ -611,7 +623,7 @@ export default function handler(req, res) {
         if (!isSuperAdmin) {
           return res.status(403).json({ error: 'Insufficient privileges to manage tenants' })
         }
-        const existingRow = db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(id)
+        const existingRow = await db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(id)
         if (!existingRow) {
           return res.status(404).json({ error: 'Tenant not found' })
         }
@@ -619,13 +631,13 @@ export default function handler(req, res) {
         const keys = Object.keys(data)
         const values = Object.values(data)
         const setClause = keys.map((k) => `${k} = ?`).join(', ')
-        db.prepare(`UPDATE ${TENANT_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
-        const updated = db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(id)
+        await db.prepare(`UPDATE ${TENANT_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
+        const updated = await db.prepare(`SELECT * FROM ${TENANT_TABLE} WHERE id = ?`).get(id)
         return res.json(decodeTenantRow(updated))
       }
 
       if (entityName === TENANT_CATEGORY_TABLE) {
-        const existingRow = db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(id)
+        const existingRow = await db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(id)
         if (!existingRow) {
           return res.status(404).json({ error: 'Tenant category not found' })
         }
@@ -636,13 +648,13 @@ export default function handler(req, res) {
         const keys = Object.keys(data)
         const values = Object.values(data)
         const setClause = keys.map((k) => `${k} = ?`).join(', ')
-        db.prepare(`UPDATE ${TENANT_CATEGORY_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
-        const updated = db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(id)
+        await db.prepare(`UPDATE ${TENANT_CATEGORY_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
+        const updated = await db.prepare(`SELECT * FROM ${TENANT_CATEGORY_TABLE} WHERE id = ?`).get(id)
         return res.json(decodeTenantCategoryRow(updated))
       }
 
       if (entityName === TENANT_CONTACT_TABLE) {
-        const existingRow = db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(id)
+        const existingRow = await db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(id)
         if (!existingRow) {
           return res.status(404).json({ error: 'Tenant contact not found' })
         }
@@ -653,8 +665,8 @@ export default function handler(req, res) {
         const keys = Object.keys(data)
         const values = Object.values(data)
         const setClause = keys.map((k) => `${k} = ?`).join(', ')
-        db.prepare(`UPDATE ${TENANT_CONTACT_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
-        const updated = db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(id)
+        await db.prepare(`UPDATE ${TENANT_CONTACT_TABLE} SET ${setClause} WHERE id = ?`).run(...values, id)
+        const updated = await db.prepare(`SELECT * FROM ${TENANT_CONTACT_TABLE} WHERE id = ?`).get(id)
         return res.json(decodeTenantContactRow(updated))
       }
 
@@ -666,13 +678,13 @@ export default function handler(req, res) {
       const values = Object.values(data)
       const setClause = keys.map((k) => `${k} = ?`).join(',')
       const stmt = db.prepare(`UPDATE ${entityName} SET ${setClause} WHERE id = ?`)
-      stmt.run(...values, id)
+      await stmt.run(...values, id)
       return res.json({ id, ...data })
     }
 
     if (req.method === 'DELETE' && id) {
       if (!tableAvailable) {
-        const existingRow = db
+        const existingRow = await db
           .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
           .get(id, normalizedSlug)
         if (!existingRow) {
@@ -681,7 +693,7 @@ export default function handler(req, res) {
         if (!canAccessGenericRow(existingRow.tenant_id, decoded.tenant_id, isSuperAdmin)) {
           return res.status(403).json({ error: 'Insufficient privileges to delete this record' })
         }
-        db.prepare(`DELETE FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`).run(id, normalizedSlug)
+        await db.prepare(`DELETE FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`).run(id, normalizedSlug)
         return res.json({ message: 'Deleted successfully' })
       }
       if (entityName === TENANT_TABLE && !isSuperAdmin) {
@@ -690,7 +702,7 @@ export default function handler(req, res) {
 
       if (entityName === TENANT_CATEGORY_TABLE || entityName === TENANT_CONTACT_TABLE) {
         const tableName = entityName === TENANT_CATEGORY_TABLE ? TENANT_CATEGORY_TABLE : TENANT_CONTACT_TABLE
-        const existingRow = db.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(id)
+        const existingRow = await db.prepare(`SELECT * FROM ${tableName} WHERE id = ?`).get(id)
         if (!existingRow) {
           return res.status(404).json({ error: 'Not found' })
         }
@@ -699,7 +711,7 @@ export default function handler(req, res) {
         }
       }
       const stmt = db.prepare(`DELETE FROM ${entityName} WHERE id = ?`)
-      stmt.run(id)
+      await stmt.run(id)
       return res.json({ message: 'Deleted successfully' })
     }
 

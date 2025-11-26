@@ -17,6 +17,18 @@ const storage = typeof window !== 'undefined'
 
 const FALLBACK_ENTITY_KEY = 'recims_fallback_entities';
 const FALLBACK_UPLOAD_KEY = 'recims_fallback_uploads';
+const CACHEABLE_ENTITIES = new Set([
+  'tenant',
+  'tenants',
+  'tenant_categories',
+  'tenant_category',
+  'tenant_contacts',
+  'tenant_contact',
+  'appsettings',
+  'appsetting',
+  'shiftlog',
+  'shiftlogs',
+]);
 
 function safeParseJSON(value, fallback) {
   try {
@@ -28,6 +40,10 @@ function safeParseJSON(value, fallback) {
 
 function normalizeEntityKey(name) {
   return (name || '').toString().trim().toLowerCase();
+}
+
+function isCacheableEntity(entityName) {
+  return CACHEABLE_ENTITIES.has(normalizeEntityKey(entityName));
 }
 
 function getFallbackEntityMap() {
@@ -43,12 +59,18 @@ function saveFallbackEntityMap(map) {
 }
 
 function readFallbackList(entityName) {
+  if (!isCacheableEntity(entityName)) {
+    return [];
+  }
   const map = getFallbackEntityMap();
   const records = map[normalizeEntityKey(entityName)] || [];
   return Array.isArray(records) ? records.map((item) => ({ ...item })) : [];
 }
 
 function writeFallbackList(entityName, list) {
+  if (!isCacheableEntity(entityName)) {
+    return;
+  }
   const map = getFallbackEntityMap();
   map[normalizeEntityKey(entityName)] = Array.isArray(list)
     ? list.map((item) => ({ ...item }))
@@ -61,6 +83,9 @@ function generateClientId() {
 }
 
 function upsertFallbackRecord(entityName, record) {
+  if (!isCacheableEntity(entityName)) {
+    return { ...record };
+  }
   const list = readFallbackList(entityName);
   const now = new Date().toISOString();
   const normalizedId = record?.id != null ? String(record.id) : null;
@@ -96,6 +121,9 @@ function upsertFallbackRecord(entityName, record) {
 }
 
 function removeFallbackRecord(entityName, id) {
+  if (!isCacheableEntity(entityName)) {
+    return;
+  }
   const list = readFallbackList(entityName);
   const filtered = list.filter((item) => String(item.id) !== String(id));
   writeFallbackList(entityName, filtered);
@@ -481,6 +509,19 @@ const functions = {
   },
 };
 
+const maintenance = {
+  async exportConfig(tenantId) {
+    const query = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    return fetchAPI(`/maintenance/config${query}`);
+  },
+  async importConfig(payload) {
+    return fetchAPI('/maintenance/config', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
 // Integrations API (placeholder)
 const notImplemented = (feature) => {
   console.warn(`${feature} integration not available in standalone mode`);
@@ -610,6 +651,7 @@ export const recims = {
   auth,
   entities,
   functions,
+  maintenance,
   integrations,
   agents,
 };

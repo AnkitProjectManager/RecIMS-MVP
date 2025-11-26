@@ -1,10 +1,10 @@
 const jwt = require('jsonwebtoken')
 const bcrypt = require('bcryptjs')
-const { init } = require('../../../lib/db')
+const { init } = require('../../../lib/persistence')
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this'
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Allow', 'POST, OPTIONS')
     return res.status(204).end()
@@ -15,10 +15,10 @@ export default function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' })
   }
 
-  const db = init()
+  const db = await init()
   try {
     const { email, password } = req.body
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
+    const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email)
     if (!user || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ error: 'Invalid email or password' })
     }

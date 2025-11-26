@@ -1,11 +1,11 @@
-const { init } = require('../../../lib/db')
+const { init } = require('../../../lib/persistence')
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
   try {
     const { email } = req.body
-    const db = init()
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email)
+    const db = await init()
+    await db.prepare('SELECT id FROM users WHERE email = ?').get(email)
     // In production, send an email. Here return success so UI behaves correctly.
     return res.json({ message: 'If that email exists, a reset link has been sent' })
   } catch (err) {
