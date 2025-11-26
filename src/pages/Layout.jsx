@@ -40,6 +40,11 @@ function LayoutShell({ children, currentPageName }) {
   const queryClient = useQueryClient();
   const { user, tenantConfig, loading } = useTenant();
 
+  const normalizedFeatures = React.useMemo(
+    () => tenantConfig?.features ?? {},
+    [tenantConfig?.features]
+  );
+
   const handleLogout = React.useCallback(async () => {
     try {
       await recims.auth.logout();
@@ -50,8 +55,6 @@ function LayoutShell({ children, currentPageName }) {
       navigate('/Login', { replace: true });
     }
   }, [navigate, queryClient]);
-
-  const normalizedFeatures = tenantConfig?.features ?? {};
 
   const isFeatureEnabled = React.useCallback(
     (requirements) => {

@@ -214,7 +214,10 @@ export function TenantProvider({ children }) {
     initialData: loadAppSettingsFromStorage,
   });
 
-  const appSettings = Array.isArray(appSettingsData) ? appSettingsData : [];
+  const appSettings = React.useMemo(
+    () => (Array.isArray(appSettingsData) ? appSettingsData : []),
+    [appSettingsData]
+  );
 
   React.useEffect(() => {
     if (tenantKey && tenant) {
