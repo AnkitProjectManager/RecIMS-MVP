@@ -1,0 +1,793 @@
+import React from "react";
+import { recims } from "@/api/recimsClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import {
+  TruckIcon,
+  Package,
+  Warehouse,
+  Clock,
+  TrendingUp,
+  PlayCircle,
+  StopCircle,
+  AlertCircle,
+  BarChart3,
+  RefreshCw,
+  Printer,
+  DollarSign,
+  MessageCircle
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { format, subDays, differenceInMinutes } from "date-fns";
+import { useTenant } from "@/components/TenantContext";
+
+export default function Dashboard() {
+  const [user, setUser] = React.useState(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState(null);
+  const [debugInfo, setDebugInfo] = React.useState([]);
+  const queryClient = useQueryClient();
+
+  const addDebugInfo = (message) => {
+    setDebugInfo(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
+
+  React.useEffect(() => {
+    const loadUser = async () => {
+      addDebugInfo('Starting to load user...');
+      setIsLoading(true);
+      setLoadError(null);
+      
+      try {
+        addDebugInfo('Calling recims.auth.me()...');
+        const currentUser = await recims.auth.me();
+        addDebugInfo(`User loaded: ${currentUser.email}`);
+        
+        // Ensure user has required fields with defaults
+        if (!currentUser.tenant) {
+          addDebugInfo('Setting default tenant: min_tech');
+          currentUser.tenant = 'min_tech';
+        }
+        if (!currentUser.detailed_role) {
+          addDebugInfo('Setting default role: warehouse_staff');
+          currentUser.detailed_role = 'warehouse_staff';
+        }
+        if (!currentUser.permissions) {
+          addDebugInfo('Setting default permissions: []');
+          currentUser.permissions = [];
+        }
+        
+        addDebugInfo('User setup complete!');
+        setUser(currentUser);
+        setIsLoading(false);
+      } catch (error) {
+        const errorMsg = error.message || error.toString();
+        addDebugInfo(`ERROR: ${errorMsg}`);
+        console.error("Dashboard: User authentication error:", error);
+        setLoadError(errorMsg);
+        setIsLoading(false);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // Show loading state FIRST
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center max-w-2xl p-8">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-gray-900 font-semibold mb-4">Loading dashboard...</p>
+          
+          {/* Debug info */}
+          <div className="mt-6 bg-white border rounded-lg p-4 text-left">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Loading Status:</p>
+            <div className="space-y-1 max-h-60 overflow-auto">
+              {debugInfo.map((info, idx) => (
+                <p key={idx} className="text-xs text-gray-600 font-mono">{info}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state SECOND
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
+        <div className="text-center max-w-2xl">
+          <AlertCircle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Failed to Load Dashboard</h2>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+            <p className="text-red-800 font-mono text-sm">{loadError}</p>
+          </div>
+          
+          {/* Debug info */}
+          <div className="bg-white border rounded-lg p-4 text-left mb-4">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Debug Log:</p>
+            <div className="space-y-1 max-h-60 overflow-auto">
+              {debugInfo.map((info, idx) => (
+                <p key={idx} className="text-xs text-gray-600 font-mono">{info}</p>
+              ))}
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <Button onClick={() => window.location.reload()} className="w-full">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Reload Page
+            </Button>
+            <p className="text-xs text-gray-500">
+              If this persists, you may need to log out and log back in.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show "no user" state THIRD
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-orange-600 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">User Not Found</h2>
+          <p className="text-gray-600 mb-4">Unable to load user information</p>
+          <Button onClick={() => window.location.reload()}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Reload Page
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  console.log('Dashboard: Rendering main dashboard for user:', user.email);
+  return <DashboardContent user={user} />;
+}
+
+// Separate component for the main dashboard content
+function DashboardContent({ user }) {
+  const queryClient = useQueryClient();
+  const { tenantConfig } = useTenant();
+  const [shiftTick, setShiftTick] = React.useState(Date.now());
+
+  const neumorph = {
+    base: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[8px_8px_16px_#d1d5db,-8px_-8px_16px_#ffffff]',
+    card: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[8px_8px_16px_#d1d5db,-8px_-8px_16px_#ffffff] border-0',
+    button: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[4px_4px_8px_#d1d5db,-4px_-4px_8px_#ffffff] hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] border-0',
+    iconBg: 'bg-gradient-to-br from-gray-100 to-gray-200 shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff]',
+    rounded: 'rounded-2xl',
+    roundedLg: 'rounded-3xl'
+  };
+
+  const { data: activeShift } = useQuery({
+    queryKey: ['activeShift', user?.email],
+    queryFn: async () => {
+      if (!user?.email) return null;
+      const shifts = await recims.entities.ShiftLog.filter({
+        operator_email: user.email,
+        status: 'active'
+      }, '-created_date', 1);
+      return shifts[0] || null;
+    },
+    enabled: !!user?.email,
+    initialData: null,
+  });
+
+  const { data: todayShipments = [] } = useQuery({
+    queryKey: ['todayShipments'],
+    queryFn: async () => {
+      const shipments = await recims.entities.InboundShipment.list('-created_date', 50);
+      const today = new Date().toDateString();
+      return shipments.filter(s => new Date(s.created_date).toDateString() === today);
+    },
+    initialData: [],
+  });
+
+  const { data: last7DaysShipments = [] } = useQuery({
+    queryKey: ['last7DaysShipments'],
+    queryFn: async () => {
+      const shipments = await recims.entities.InboundShipment.list('-created_date', 200);
+      const sevenDaysAgo = subDays(new Date(), 7);
+      return shipments.filter(s => new Date(s.created_date) >= sevenDaysAgo);
+    },
+    initialData: [],
+  });
+
+  const { data: pendingShipments = [] } = useQuery({
+    queryKey: ['pendingShipments'],
+    queryFn: async () => {
+      // Fetch both pending_inspection and arrived shipments
+      const pending = await recims.entities.InboundShipment.filter({
+        status: 'pending_inspection'
+      }, '-created_date', 10);
+      
+      const arrived = await recims.entities.InboundShipment.filter({
+        status: 'arrived'
+      }, '-created_date', 10);
+      
+      // Combine and sort
+      return [...pending, ...arrived].sort((a, b) => 
+        new Date(b.created_date).getTime() - new Date(a.created_date).getTime()
+      );
+    },
+    initialData: [],
+  });
+
+  const { data: completedShifts = [] } = useQuery({
+    queryKey: ['completedShiftsSummary', user?.email],
+    enabled: !!user?.email,
+    queryFn: async () => {
+      const shifts = await recims.entities.ShiftLog.list('-shift_end', 200);
+      return shifts.filter((shift) =>
+        shift.operator_email === user.email &&
+        shift.shift_start &&
+        shift.shift_end
+      );
+    },
+    initialData: [],
+  });
+
+  const { data: bins = [] } = useQuery({
+    queryKey: ['bins'],
+    queryFn: () => recims.entities.Bin.list(),
+    initialData: [],
+  });
+
+  const { data: inventory = [] } = useQuery({
+    queryKey: ['inventory', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.Inventory.filter({
+        tenant_id: user.tenant_id
+      }, '-created_date', 100);
+    },
+    enabled: !!user?.tenant_id,
+    initialData: [],
+  });
+
+  const { data: qcInspections = [] } = useQuery({
+    queryKey: ['qcInspections'],
+    queryFn: () => recims.entities.QCInspection.list('-created_date', 50),
+    initialData: [],
+  });
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ['appSettings'],
+    queryFn: () => recims.entities.AppSettings.list(),
+    initialData: [],
+  });
+
+  const { data: salesOrders = [] } = useQuery({
+    queryKey: ['salesOrders', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      const startOfYear = new Date(new Date().getFullYear(), 0, 1);
+      const allOrders = await recims.entities.SalesOrder.filter({
+        tenant_id: user.tenant_id
+      }, '-order_date', 500);
+      return allOrders.filter(order => new Date(order.order_date) >= startOfYear);
+    },
+    enabled: !!user?.tenant_id,
+    initialData: [],
+  });
+
+  const poModuleEnabled = settings.find(s => s.setting_key === 'enable_po_module')?.setting_value === 'true';
+  const binCapacityEnabled = settings.find(s => s.setting_key === 'enable_bin_capacity_management')?.setting_value === 'true';
+
+  const availableInventory = inventory.filter(i => i.status === 'available');
+  const totalInventoryValue = availableInventory.reduce((sum, i) => sum + (i.total_value || 0), 0);
+  const totalSalesYTD = salesOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
+
+  const startShiftMutation = useMutation({
+    mutationFn: async () => {
+      return await recims.entities.ShiftLog.create({
+        operator_email: user.email,
+        operator_name: user.full_name,
+        tenant_id: user.tenant_id,
+        shift_start: new Date().toISOString(),
+        status: 'active'
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['activeShift'] });
+      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary'] });
+    },
+    onError: (error) => {
+      console.error('Failed to start shift:', error);
+    },
+  });
+
+  const endShiftMutation = useMutation({
+    mutationFn: async () => {
+      return await recims.entities.ShiftLog.update(activeShift.id, {
+        shift_end: new Date().toISOString(),
+        status: 'completed',
+        updated_date: new Date().toISOString()
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['activeShift'] });
+      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary'] });
+    },
+    onError: (error) => {
+      console.error('Failed to end shift:', error);
+    },
+  });
+
+  const canStartShift = Boolean(user?.email && user?.tenant_id);
+  const canEndShift = Boolean(activeShift?.id);
+
+  // Calculate metrics - FIX: Calculate available bins based on BOTH weight AND volume capacity
+  const fullBins = bins.filter(b => b.status === 'full').length;
+  
+  // Available bins = bins with space remaining in BOTH weight AND volume (if tracked)
+  const availableBins = binCapacityEnabled 
+    ? bins.filter(b => {
+        // Check if bin is in available or empty status
+        if (b.status !== 'available' && b.status !== 'empty') return false;
+        
+        let weightOk = true;
+        let volumeOk = true;
+        
+        // Check weight capacity if tracked
+        if (b.track_weight !== false) { // track_weight default to true if not specified
+          const currentWeight = b.current_weight_kg || 0;
+          const maxWeight = b.max_weight_kg || 0;
+          weightOk = maxWeight > 0 && currentWeight < maxWeight;
+        }
+        
+        // Check volume capacity if tracked
+        if (b.track_volume) {
+          const volumeUnit = b.volume_unit || 'cubic_feet';
+          let currentVolume = 0;
+          let maxVolume = 0;
+          
+          if (volumeUnit === 'cubic_feet') {
+            currentVolume = b.current_volume_cubic_feet || 0;
+            maxVolume = b.max_volume_cubic_feet || 0;
+          } else if (volumeUnit === 'cubic_yards') {
+            currentVolume = b.current_volume_cubic_yards || 0;
+            maxVolume = b.max_volume_cubic_yards || 0;
+          } else if (volumeUnit === 'cubic_meters') { // Added 'cubic_meters' case
+            currentVolume = b.current_volume_cubic_meters || 0;
+            maxVolume = b.max_volume_cubic_meters || 0;
+          }
+          
+          volumeOk = maxVolume > 0 && currentVolume < maxVolume;
+        }
+        
+        // Bin is available only if BOTH weight AND volume (if tracked) have space
+        return weightOk && volumeOk;
+      }).length
+    : bins.filter(b => b.status === 'available' || b.status === 'empty').length;
+  
+  // Calculate metrics
+  // const fullBins = bins.filter(b => b.status === 'full').length;
+  
+  // // Available bins = bins with space remaining (current_weight < capacity)
+  // const availableBins = binCapacityEnabled 
+  //   ? bins.filter(b => {
+  //       const currentWeight = b.current_weight_kg || 0;
+  //       const capacity = b.capacity_kg || 0;
+  //       return capacity > 0 && currentWeight < capacity && 
+  //              (b.status === 'available' || b.status === 'empty');
+  //     }).length
+  //   : bins.filter(b => b.status === 'available' || b.status === 'empty').length;
+  
+  const lowStockItems = inventory.filter(i =>
+    i.reorder_point && i.quantity_on_hand <= i.reorder_point
+  ).length;
+
+  const completedShipmentsToday = todayShipments.filter(s => s.status === 'completed');
+  const avgProcessingTime = completedShipmentsToday.length > 0
+    ? completedShipmentsToday.reduce((sum, s) => {
+        const start = new Date(s.arrival_time || s.created_date);
+        const end = new Date(s.updated_date);
+        return sum + differenceInMinutes(end, start);
+      }, 0) / completedShipmentsToday.length
+    : 0;
+
+  const last30DaysQC = qcInspections.filter(qc => {
+    const qcDate = new Date(qc.inspection_date);
+    return qcDate >= subDays(new Date(), 30);
+  });
+  const qcPassRate = last30DaysQC.length > 0
+    ? (last30DaysQC.filter(qc => qc.overall_result === 'pass').length / last30DaysQC.length * 100).toFixed(1)
+    : 0;
+
+  const shipmentTrendData = [];
+  for (let i = 6; i >= 0; i--) {
+    const day = subDays(new Date(), i);
+    const dayShipments = last7DaysShipments.filter(s => {
+      const shipmentDate = new Date(s.created_date);
+      return shipmentDate.toDateString() === day.toDateString();
+    });
+    shipmentTrendData.push({
+      date: format(day, 'MMM dd'),
+      shipments: dayShipments.length,
+      weight: dayShipments.reduce((acc, s) => acc + (s.net_weight || 0), 0)
+    });
+  }
+
+  const inventoryValueTrend = shipmentTrendData.map(d => ({
+    label: d.date,
+    value: parseFloat((d.weight * 2.5).toFixed(2))
+  }));
+
+  const qcPassRateTrend = [];
+  for (let i = 6; i >= 0; i--) {
+    const day = subDays(new Date(), i);
+    qcPassRateTrend.push({
+      label: format(day, 'MMM dd'),
+      value: parseFloat((Math.random() * 20 + 80).toFixed(1))
+    });
+  }
+
+  React.useEffect(() => {
+    if (!activeShift?.shift_start) {
+      return undefined;
+    }
+
+    // Force re-render ticks while a shift is active so duration updates in real-time
+    setShiftTick(Date.now());
+    const interval = setInterval(() => {
+      setShiftTick(Date.now());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeShift?.id, activeShift?.shift_start]);
+
+  const getShiftDuration = React.useCallback(() => {
+    if (!activeShift?.shift_start) return '00:00';
+
+    const start = new Date(activeShift.shift_start).getTime();
+    const now = shiftTick;
+    const diffMs = Math.max(0, now - start);
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600)
+      .toString()
+      .padStart(2, '0');
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+      .toString()
+      .padStart(2, '0');
+    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  }, [activeShift, shiftTick]);
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'arrived':
+        return 'bg-orange-100 text-orange-700 border-orange-300';
+      case 'processing':
+        return 'bg-blue-100 text-blue-700 border-blue-300';
+      case 'completed':
+        return 'bg-green-100 text-green-700 border-green-300';
+      case 'pending':
+      case 'pending_inspection': // Added pending_inspection status
+        return 'bg-gray-100 text-gray-700 border-gray-300';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700 border-red-300';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-300';
+    }
+  };
+
+  const getInventoryActionUrl = () => {
+    if (tenantConfig?.features?.po_module_enabled) {
+      return createPageUrl("PurchaseOrders");
+    }
+    return createPageUrl("AddToInventory");
+  };
+
+  const getInventoryActionLabel = () => {
+    if (tenantConfig?.features?.po_module_enabled) {
+      return 'Purchase Orders';
+    }
+    return 'Add Inventory';
+  };
+
+  const lastCompletedShift = completedShifts[0] ?? null;
+
+  const totalCompletedMinutes = React.useMemo(() => {
+    return completedShifts.reduce((total, shift) => {
+      const start = new Date(shift.shift_start);
+      const end = new Date(shift.shift_end);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return total;
+      }
+      const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+      return total + minutes;
+    }, 0);
+  }, [completedShifts]);
+
+  const formatMinutes = React.useCallback((minutes) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return '0h 0m';
+    }
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hrs}h ${mins}m`;
+  }, []);
+
+  const lastShiftDuration = React.useMemo(() => {
+    if (!lastCompletedShift) return null;
+    const start = new Date(lastCompletedShift.shift_start);
+    const end = new Date(lastCompletedShift.shift_end);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return null;
+    }
+    const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+    return formatMinutes(minutes);
+  }, [lastCompletedShift, formatMinutes]);
+
+  const lastShiftEndedAt = React.useMemo(() => {
+    if (!lastCompletedShift?.shift_end) return null;
+    const end = new Date(lastCompletedShift.shift_end);
+    if (Number.isNaN(end.getTime())) return null;
+    return format(end, 'MMM d, h:mm a');
+  }, [lastCompletedShift]);
+
+  const totalShiftDurationDisplay = React.useMemo(() => {
+    return formatMinutes(totalCompletedMinutes);
+  }, [formatMinutes, totalCompletedMinutes]);
+
+  console.log('Dashboard: Rendering content');
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+
+      {/* Shift Control */}
+      <Card className={`mb-6 ${neumorph.card} ${neumorph.roundedLg}`}>
+        <CardContent className="p-4 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {activeShift ? 'Shift Active' : 'No Active Shift'}
+              </h2>
+              {activeShift && (
+                <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-4 h-4" />
+                    <span>Duration: {getShiftDuration()}</span>
+                  </div>
+                  <div>Started: {format(new Date(activeShift.shift_start), 'h:mm a')}</div>
+                </div>
+              )}
+              {user?.email && (
+                <div className="mt-3 text-xs text-gray-600 space-y-1">
+                  {lastShiftDuration && (
+                    <div>
+                      <span className="font-medium text-gray-700">Last Shift:</span> {lastShiftDuration}
+                      {lastShiftEndedAt && (
+                        <span className="text-gray-500"> · Ended {lastShiftEndedAt}</span>
+                      )}
+                    </div>
+                  )}
+                  <div>
+                    <span className="font-medium text-gray-700">Total Logged:</span> {totalShiftDurationDisplay}
+                  </div>
+                </div>
+              )}
+            </div>
+            {activeShift ? (
+              <Button
+                onClick={() => {
+                  if (!canEndShift) return;
+                  endShiftMutation.mutate();
+                }}
+                disabled={endShiftMutation.isPending || !canEndShift}
+                className={`${neumorph.button} gap-2 text-red-600 hover:text-red-700`}
+              >
+                <StopCircle className="w-4 h-4" />
+                End Shift
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  if (!canStartShift) return;
+                  startShiftMutation.mutate();
+                }}
+                disabled={startShiftMutation.isPending || !canStartShift}
+                className={`${neumorph.button} gap-2`}
+                style={{ color: '#388E3C' }}
+              >
+                <PlayCircle className="w-4 h-4" />
+                Start Shift
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick Stats - MAKE CLICKABLE */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <Link to={createPageUrl("InboundShipments")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <TruckIcon className="w-6 h-6" style={{ color: '#388E3C' }} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{todayShipments.length}</p>
+                  <p className="text-xs text-gray-500">{`Today's Loads`}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to={createPageUrl("InboundShipments?status=arrived")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <AlertCircle className="w-6 h-6 text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{pendingShipments.length}</p>
+                  <p className="text-xs text-gray-500">Pending</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to={createPageUrl("BinManagement")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <Warehouse className="w-6 h-6" style={{ color: '#00695C' }} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{availableBins}</p>
+                  <p className="text-xs text-gray-500">
+                    {binCapacityEnabled ? 'Available Bins' : 'Available Bins'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to={createPageUrl("BinManagement?status=full")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <Package className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{fullBins}</p>
+                  <p className="text-xs text-gray-500">Full Bins</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to={createPageUrl("InventoryManagement")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <DollarSign className="w-6 h-6" style={{ color: '#1976D2' }} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">${(totalInventoryValue / 1000).toFixed(1)}K</p>
+                  <p className="text-xs text-gray-500">Inventory Value</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to={createPageUrl("SalesOrderManagement")}>
+          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
+                  <TrendingUp className="w-6 h-6" style={{ color: '#388E3C' }} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">${(totalSalesYTD / 1000).toFixed(1)}K</p>
+                  <p className="text-xs text-gray-500">Sales YTD</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      </div>
+
+      {/* Quick Actions */}
+      <Card className={`mb-6 ${neumorph.card} ${neumorph.roundedLg}`}>
+        <CardHeader>
+          <CardTitle>Quick Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <Link to={createPageUrl("NewShipment")}>
+              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#26A69A' }}>
+                <TruckIcon className="w-6 h-6" />
+                <span className="text-sm font-semibold">New Inbound</span>
+              </Button>
+            </Link>
+            <Link to={createPageUrl("MaterialClassification")}>
+              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#388E3C' }}>
+                <Package className="w-6 h-6" />
+                <span className="text-sm font-semibold">Classify</span>
+              </Button>
+            </Link>
+            <Link to={getInventoryActionUrl()}>
+              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#00695C' }}>
+                <Package className="w-6 h-6" />
+                <span className="text-sm font-semibold">{getInventoryActionLabel()}</span>
+              </Button>
+            </Link>
+            <Link to={createPageUrl("Reports")}>
+              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#1C262E' }}>
+                <BarChart3 className="w-6 h-6" />
+                <span className="text-sm font-semibold">Reports</span>
+              </Button>
+            </Link>
+            <a href={recims.agents.getWhatsAppConnectURL('reports_assistant')} target="_blank" rel="noopener noreferrer">
+              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#25D366' }}>
+                <MessageCircle className="w-6 h-6" />
+                <span className="text-sm font-semibold">AI Assistant</span>
+              </Button>
+            </a>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Pending Shipments */}
+      <Card className={`${neumorph.card} ${neumorph.roundedLg}`}>
+        <CardHeader>
+          <CardTitle>Recent Inbound Shipments</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {pendingShipments.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <TruckIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No recent shipments</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingShipments.slice(0, 5).map((shipment) => (
+                <div key={shipment.id} className={`flex items-center justify-between p-3 ${neumorph.base} ${neumorph.rounded} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all`}>
+                  <div className="flex-1">
+                    <p className="font-semibold">{shipment.load_id}</p>
+                    <p className="text-sm text-gray-600">
+                      {shipment.supplier_name} • {shipment.load_type}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={getStatusColor(shipment.status)}>
+                      {shipment.status}
+                    </Badge>
+                    <Link to={createPageUrl(`PrintInboundLabel?id=${shipment.id}`)}>
+                      <Button className={`h-8 w-8 ${neumorph.button} ${neumorph.rounded}`} size="icon">
+                        <Printer className="w-4 h-4 text-gray-600" />
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      </div>
+    </div>
+  );
+}

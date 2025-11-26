@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" rx="15" fill="#1a1a1a"/>
+  <path d="M30 25 L30 75 L45 75 L45 60 L55 60 L55 75 L70 75 L70 40 L50 25 Z" fill="#4ade80" stroke="#22c55e" stroke-width="2"/>
+  <rect x="35" y="45" width="8" height="10" fill="#1a1a1a"/>
+  <rect x="57" y="45" width="8" height="10" fill="#1a1a1a"/>
+  <text x="50" y="92" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#4ade80" text-anchor="middle">RecIMS</text>
+</svg>
