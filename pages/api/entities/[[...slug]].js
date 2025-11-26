@@ -5,6 +5,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this'
 const TENANT_TABLE = 'tenants'
 const TENANT_CATEGORY_TABLE = 'tenant_categories'
 const TENANT_CONTACT_TABLE = 'tenant_contacts'
+const GENERIC_ENTITY_TABLE = 'entity_records'
 const TENANT_JSON_FIELD_MAP = {
   number_format_json: 'number_format',
   default_load_types_json: 'default_load_types',
@@ -166,6 +167,45 @@ function decodeTenantContactRow(row) {
   result.signature_type = (result.signature_type || 'none').toLowerCase()
   result.signature_font = result.signature_font || DEFAULT_SIGNATURE_FONT
   return result
+}
+
+function decodeGenericEntityRow(row) {
+  if (!row) return row
+  let payload = {}
+  if (row.payload_json) {
+    try {
+      payload = JSON.parse(row.payload_json)
+    } catch (error) {
+      payload = {}
+    }
+  }
+
+  const result = {
+    id: row.id,
+    ...payload,
+  }
+
+  if (!('tenant_id' in result) && row.tenant_id) {
+    result.tenant_id = row.tenant_id
+  }
+
+  if (!('created_date' in result) && row.created_date) {
+    result.created_date = row.created_date
+  }
+
+  if (!('updated_date' in result) && row.updated_date) {
+    result.updated_date = row.updated_date
+  }
+
+  return result
+}
+
+function canAccessGenericRow(rowTenantId, actorTenantId, isSuperAdmin) {
+  if (isSuperAdmin) return true
+  const normalizedRow = normalizeTenantId(rowTenantId)
+  const normalizedActor = normalizeTenantId(actorTenantId)
+  if (!normalizedRow) return true
+  return normalizedRow === normalizedActor
 }
 
 function encodeTenantInput(input = {}, existingRow, actorContext) {
@@ -399,9 +439,10 @@ export default function handler(req, res) {
   const normalizedRole = normalizeRole(decoded.role)
   const isSuperAdmin = normalizedRole === 'super_admin'
   let entityName = ''
+  let normalizedSlug = ''
 
   try {
-    const normalizedSlug = normalizeEntitySlug(rawEntity)
+    normalizedSlug = normalizeEntitySlug(rawEntity)
     if (!normalizedSlug) return res.status(400).json({ error: 'Entity name required' })
     entityName = resolveTableName(normalizedSlug)
 
@@ -413,7 +454,12 @@ export default function handler(req, res) {
 
     if (req.method === 'GET' && !id) {
       if (!tableAvailable) {
-        return res.json([])
+        const tenantFilter = normalizeTenantId(decoded.tenant_id)
+        const stmt = isSuperAdmin
+          ? db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? ORDER BY datetime(created_date) DESC, id DESC`)
+          : db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE entity_name = ? AND (tenant_id = ? OR tenant_id IS NULL) ORDER BY datetime(created_date) DESC, id DESC`)
+        const rows = isSuperAdmin ? stmt.all(normalizedSlug) : stmt.all(normalizedSlug, tenantFilter)
+        return res.json(rows.map(decodeGenericEntityRow))
       }
       if (entityName === TENANT_TABLE) {
         const stmt = isSuperAdmin
@@ -439,7 +485,13 @@ export default function handler(req, res) {
 
     if (req.method === 'GET' && id) {
       if (!tableAvailable) {
-        return res.status(404).json({ error: 'Entity not found' })
+        const tenantFilter = normalizeTenantId(decoded.tenant_id)
+        const stmt = isSuperAdmin
+          ? db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
+          : db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ? AND (tenant_id = ? OR tenant_id IS NULL)`)
+        const row = isSuperAdmin ? stmt.get(id, normalizedSlug) : stmt.get(id, normalizedSlug, tenantFilter)
+        if (!row) return res.status(404).json({ error: 'Not found' })
+        return res.json(decodeGenericEntityRow(row))
       }
       const stmt = db.prepare(`SELECT * FROM ${entityName} WHERE id = ?`)
       const row = stmt.get(id)
@@ -458,7 +510,20 @@ export default function handler(req, res) {
 
     if (req.method === 'POST') {
       if (!tableAvailable) {
-        return res.status(404).json({ error: `Entity "${normalizedSlug}" is not supported` })
+        const baseData = prepareGenericData(req.body || {}, decoded.tenant_id)
+        const tenantForRecord = normalizeTenantId(baseData.tenant_id, decoded.tenant_id)
+        if (tenantForRecord) {
+          baseData.tenant_id = tenantForRecord
+        }
+        if (!baseData.created_date) {
+          const timestamp = new Date().toISOString()
+          baseData.created_date = timestamp
+          baseData.updated_date = timestamp
+        }
+        const stmt = db.prepare(`INSERT INTO ${GENERIC_ENTITY_TABLE} (entity_name, tenant_id, payload_json) VALUES (?, ?, ?)`)
+        const result = stmt.run(normalizedSlug, tenantForRecord || null, JSON.stringify(baseData))
+        const created = db.prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ?`).get(result.lastInsertRowid)
+        return res.status(201).json(decodeGenericEntityRow(created))
       }
       let data
 
@@ -504,7 +569,43 @@ export default function handler(req, res) {
 
     if (req.method === 'PUT' && id) {
       if (!tableAvailable) {
-        return res.status(404).json({ error: 'Entity not found' })
+        const existingRow = db
+          .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
+          .get(id, normalizedSlug)
+        if (!existingRow) {
+          return res.status(404).json({ error: 'Entity not found' })
+        }
+        if (!canAccessGenericRow(existingRow.tenant_id, decoded.tenant_id, isSuperAdmin)) {
+          return res.status(403).json({ error: 'Insufficient privileges to update this record' })
+        }
+
+        const existingPayload = decodeGenericEntityRow(existingRow)
+        const mergedPayload = { ...existingPayload, ...req.body }
+        delete mergedPayload.id
+
+        const tenantForRecord = normalizeTenantId(mergedPayload.tenant_id, existingRow.tenant_id || decoded.tenant_id)
+        if (tenantForRecord) {
+          mergedPayload.tenant_id = tenantForRecord
+        } else {
+          delete mergedPayload.tenant_id
+        }
+
+        const updatedTimestamp = new Date().toISOString()
+        mergedPayload.updated_date = updatedTimestamp
+        if (!mergedPayload.created_date) {
+          mergedPayload.created_date = existingPayload.created_date || updatedTimestamp
+        }
+
+        db.prepare(
+          `UPDATE ${GENERIC_ENTITY_TABLE}
+             SET tenant_id = ?, payload_json = ?, updated_date = ?
+           WHERE id = ? AND entity_name = ?`
+        ).run(tenantForRecord || null, JSON.stringify(mergedPayload), updatedTimestamp, id, normalizedSlug)
+
+        const updatedRow = db
+          .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
+          .get(id, normalizedSlug)
+        return res.json(decodeGenericEntityRow(updatedRow))
       }
       if (entityName === TENANT_TABLE) {
         if (!isSuperAdmin) {
@@ -571,7 +672,17 @@ export default function handler(req, res) {
 
     if (req.method === 'DELETE' && id) {
       if (!tableAvailable) {
-        return res.status(404).json({ error: 'Entity not found' })
+        const existingRow = db
+          .prepare(`SELECT * FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`)
+          .get(id, normalizedSlug)
+        if (!existingRow) {
+          return res.status(404).json({ error: 'Entity not found' })
+        }
+        if (!canAccessGenericRow(existingRow.tenant_id, decoded.tenant_id, isSuperAdmin)) {
+          return res.status(403).json({ error: 'Insufficient privileges to delete this record' })
+        }
+        db.prepare(`DELETE FROM ${GENERIC_ENTITY_TABLE} WHERE id = ? AND entity_name = ?`).run(id, normalizedSlug)
+        return res.json({ message: 'Deleted successfully' })
       }
       if (entityName === TENANT_TABLE && !isSuperAdmin) {
         return res.status(403).json({ error: 'Insufficient privileges to delete tenants' })

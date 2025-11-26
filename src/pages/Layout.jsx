@@ -38,12 +38,7 @@ function LayoutShell({ children, currentPageName }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, tenantConfig, loading } = useTenant();
-
-  const normalizedFeatures = React.useMemo(
-    () => tenantConfig?.features ?? {},
-    [tenantConfig?.features]
-  );
+  const { user } = useTenant();
 
   const handleLogout = React.useCallback(async () => {
     try {
@@ -55,16 +50,6 @@ function LayoutShell({ children, currentPageName }) {
       navigate('/Login', { replace: true });
     }
   }, [navigate, queryClient]);
-
-  const isFeatureEnabled = React.useCallback(
-    (requirements) => {
-      if (!requirements) return true;
-      if (loading) return true;
-      const keys = Array.isArray(requirements) ? requirements : [requirements];
-      return keys.some((key) => normalizedFeatures[key]);
-    },
-    [normalizedFeatures, loading]
-  );
 
   const rawMenuItems = React.useMemo(() => ([
     { name: 'Home', icon: LayoutDashboard, path: 'Home', color: 'text-green-600' },
@@ -84,10 +69,7 @@ function LayoutShell({ children, currentPageName }) {
     { name: 'Settings', icon: Settings, path: 'Settings', color: 'text-gray-600' }
   ]), []);
 
-  const menuItems = React.useMemo(
-    () => rawMenuItems.filter((item) => isFeatureEnabled(item.requiredFeatures)),
-    [rawMenuItems, isFeatureEnabled]
-  );
+  const menuItems = rawMenuItems;
 
   const normalizedRole = typeof user?.role === 'string' ? user.role.toLowerCase() : '';
   const normalizedDetailedRole = typeof user?.detailed_role === 'string' ? user.detailed_role.toLowerCase() : '';

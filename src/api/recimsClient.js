@@ -124,6 +124,37 @@ const auth = {
 
 // Entity API factory
 function createEntityAPI(entityName) {
+  const valuesEqual = (left, right) => {
+    if (left === right) return true;
+    if (left == null || right == null) {
+      return left == null && right == null;
+    }
+
+    if (typeof left === 'number' && typeof right === 'string') {
+      return String(left) === right;
+    }
+
+    if (typeof left === 'string' && typeof right === 'number') {
+      return left === String(right);
+    }
+
+    if (typeof left === 'boolean' && typeof right === 'string') {
+      const normalized = right.trim().toLowerCase();
+      if (normalized === 'true') return left === true;
+      if (normalized === 'false') return left === false;
+      return false;
+    }
+
+    if (typeof left === 'string' && typeof right === 'boolean') {
+      const normalized = left.trim().toLowerCase();
+      if (normalized === 'true') return right === true;
+      if (normalized === 'false') return right === false;
+      return false;
+    }
+
+    return String(left) === String(right);
+  };
+
   return {
     async list(orderBy, limit) {
       const entities = await fetchAPI(`/entities/${entityName}`);
@@ -151,9 +182,16 @@ function createEntityAPI(entityName) {
       const entities = await this.list(orderBy);
       
       // Apply filters client-side
-      return entities.filter(entity => {
-        return Object.keys(filters).every(key => {
-          return entity[key] === filters[key];
+      return entities.filter((entity) => {
+        return Object.keys(filters).every((key) => {
+          const filterValue = filters[key];
+          const entityValue = entity[key];
+
+          if (Array.isArray(filterValue)) {
+            return filterValue.some((candidate) => valuesEqual(entityValue, candidate));
+          }
+
+          return valuesEqual(entityValue, filterValue);
         });
       });
     },
@@ -191,44 +229,60 @@ const entities = {
   Tenant: createEntityAPI('tenants'),
   
   // Inventory entities
+  Material: createEntityAPI('Material'),
   Inventory: createEntityAPI('Inventory'),
   Bin: createEntityAPI('Bin'),
   ProductSKU: createEntityAPI('ProductSKU'),
   Zone: createEntityAPI('Zone'),
+  MaterialCategory: createEntityAPI('MaterialCategory'),
+  Supplier: createEntityAPI('Supplier'),
   
   // Shipment entities
   InboundShipment: createEntityAPI('InboundShipment'),
+  OutboundShipment: createEntityAPI('OutboundShipment'),
   
   // Purchase Order entities
   PurchaseOrder: createEntityAPI('PurchaseOrder'),
   PurchaseOrderLine: createEntityAPI('PurchaseOrderLine'),
+  PurchaseOrderItem: createEntityAPI('PurchaseOrderItem'),
   
   // Sales Order entities
   SalesOrder: createEntityAPI('SalesOrder'),
   SalesOrderLine: createEntityAPI('SalesOrderLine'),
+  SalesOrderItem: createEntityAPI('SalesOrderItem'),
+  Invoice: createEntityAPI('Invoice'),
+  InvoiceLine: createEntityAPI('InvoiceLine'),
+  SignatureRequest: createEntityAPI('SignatureRequest'),
   
   // Quality Control
   QCInspection: createEntityAPI('QCInspection'),
   QCCriteria: createEntityAPI('QCCriteria'),
+  AuditTrail: createEntityAPI('AuditTrail'),
+  ComplianceCertificate: createEntityAPI('ComplianceCertificate'),
   
   // Customer/Vendor
   Customer: createEntityAPI('Customer'),
   Vendor: createEntityAPI('Vendor'),
+  Address: createEntityAPI('Address'),
+  EmailTemplate: createEntityAPI('EmailTemplate'),
   
   // Settings & Config
   AppSettings: createEntityAPI('AppSettings'),
+  AlertSettings: createEntityAPI('AlertSettings'),
+  InventoryAlert: createEntityAPI('InventoryAlert'),
   TenantCategory: createEntityAPI('tenant_categories'),
   TenantContact: createEntityAPI('tenant_contacts'),
+  ReportHistory: createEntityAPI('ReportHistory'),
+  QBOConnection: createEntityAPI('QBOConnection'),
   
   // Logistics
   Carrier: createEntityAPI('Carrier'),
   Waybill: createEntityAPI('Waybill'),
   WaybillItem: createEntityAPI('WaybillItem'),
+  Container: createEntityAPI('Container'),
   
   // Misc
   ShiftLog: createEntityAPI('ShiftLog'),
-  Container: createEntityAPI('Container'),
-  MaterialCategory: createEntityAPI('MaterialCategory'),
 };
 
 // Functions API (placeholder for now)

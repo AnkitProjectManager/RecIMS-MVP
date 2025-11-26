@@ -17,6 +17,8 @@ const STORAGE_KEYS = {
   tenantConfigs: 'recims:tenantConfigs',
 };
 
+const APP_SETTINGS_GLOBAL_KEY = '__global';
+
 const isBrowser = typeof window !== 'undefined';
 
 const readJsonStorage = (key, fallback) => {
@@ -40,14 +42,41 @@ const writeJsonStorage = (key, value) => {
   }
 };
 
-const loadAppSettingsFromStorage = () => {
+const readAppSettingsBuckets = () => {
   const stored = readJsonStorage(STORAGE_KEYS.appSettings, null);
-  return Array.isArray(stored) ? stored : undefined;
+  if (!stored) return {};
+  if (Array.isArray(stored)) {
+    return { [APP_SETTINGS_GLOBAL_KEY]: stored };
+  }
+  if (typeof stored === 'object') {
+    return stored;
+  }
+  return {};
 };
 
-const persistAppSettingsToStorage = (settings) => {
+const normalizeAppSettingsKey = (tenantKey) => {
+  if (tenantKey === null || tenantKey === undefined) return APP_SETTINGS_GLOBAL_KEY;
+  return String(tenantKey);
+};
+
+const loadAppSettingsFromStorage = (tenantKey) => {
+  const buckets = readAppSettingsBuckets();
+  const normalizedKey = normalizeAppSettingsKey(tenantKey);
+  const byTenant = buckets[normalizedKey];
+  if (Array.isArray(byTenant)) return byTenant;
+  const global = buckets[APP_SETTINGS_GLOBAL_KEY];
+  return Array.isArray(global) ? global : undefined;
+};
+
+const persistAppSettingsToStorage = (tenantKey, settings) => {
   if (!Array.isArray(settings)) return;
-  writeJsonStorage(STORAGE_KEYS.appSettings, settings);
+  const buckets = readAppSettingsBuckets();
+  const normalizedKey = normalizeAppSettingsKey(tenantKey);
+  const next = {
+    ...buckets,
+    [normalizedKey]: settings,
+  };
+  writeJsonStorage(STORAGE_KEYS.appSettings, next);
 };
 
 const loadTenantFromStorage = (tenantKey) => {
@@ -203,15 +232,17 @@ export function TenantProvider({ children }) {
     },
   });
 
+  const normalizedAppSettingsKey = tenantKey ?? APP_SETTINGS_GLOBAL_KEY;
+
   const {
     data: appSettingsData,
     isLoading: settingsLoading,
     error: settingsError,
   } = useQuery({
-    queryKey: ['appSettings'],
+    queryKey: ['appSettings', normalizedAppSettingsKey],
     queryFn: () => recims.entities.AppSettings.list(),
     staleTime: 30_000,
-    initialData: loadAppSettingsFromStorage,
+    initialData: () => loadAppSettingsFromStorage(tenantKey),
   });
 
   const appSettings = React.useMemo(
@@ -227,9 +258,9 @@ export function TenantProvider({ children }) {
 
   React.useEffect(() => {
     if (Array.isArray(appSettingsData)) {
-      persistAppSettingsToStorage(appSettingsData);
+      persistAppSettingsToStorage(tenantKey, appSettingsData);
     }
-  }, [appSettingsData]);
+  }, [tenantKey, appSettingsData]);
 
   const { mergedFeatures, featureFlags } = useMemo(
     () => deriveFeatureState(tenant?.features, appSettings),
@@ -253,7 +284,7 @@ export function TenantProvider({ children }) {
       if (tenantKey) {
         queryClient.invalidateQueries({ queryKey: ['tenantConfig', tenantKey] });
       }
-      queryClient.invalidateQueries({ queryKey: ['appSettings'] });
+      queryClient.invalidateQueries({ queryKey: ['appSettings'], exact: false });
     };
 
     return {
