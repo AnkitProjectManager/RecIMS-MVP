@@ -24,7 +24,6 @@ import {
   Grid3x3
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import PersistenceNotice from "@/components/alerts/PersistenceNotice";
 
 export default function Layout({ children, currentPageName }) {
   return (
@@ -101,12 +100,6 @@ function LayoutShell({ children, currentPageName }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <TenantHeader onLogout={handleLogout} />
-      {hasAdminAccess && (
-        <div className="px-4 md:px-8 pt-4">
-          <PersistenceNotice />
-        </div>
-      )}
-
       <div className="flex">
         {/* Mobile Menu Button */}
         <Button
