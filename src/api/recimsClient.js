@@ -12,6 +12,124 @@ const storage = typeof window !== 'undefined'
       removeItem: () => {},
     };
 
+const ENTITY_CACHE_PREFIX = 'recims:entityCache:';
+
+const entityCache = {
+  key(entityName) {
+    return `${ENTITY_CACHE_PREFIX}${entityName}`;
+  },
+
+  read(entityName) {
+    const raw = storage.getItem(this.key(entityName));
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  },
+
+  write(entityName, records) {
+    if (!Array.isArray(records)) return;
+    try {
+      storage.setItem(this.key(entityName), JSON.stringify(records));
+    } catch (error) {
+      // Best-effort cache; ignore quota errors.
+    }
+  },
+
+  normalizeId(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' || typeof value === 'number') {
+      return String(value);
+    }
+    if (typeof value === 'object' && 'id' in value) {
+      return this.normalizeId(value.id);
+    }
+    return null;
+  },
+
+  upsert(entityName, record) {
+    if (!record || typeof record !== 'object') return;
+    const id = this.normalizeId(record);
+    if (!id) return;
+    const existing = this.read(entityName);
+    const next = existing.filter((item) => this.normalizeId(item) !== id);
+    next.push(record);
+    this.write(entityName, next);
+  },
+
+  remove(entityName, recordId) {
+    const id = this.normalizeId(recordId);
+    if (!id) return;
+    const existing = this.read(entityName);
+    const next = existing.filter((item) => this.normalizeId(item) !== id);
+    this.write(entityName, next);
+  },
+
+  find(entityName, recordId) {
+    const id = this.normalizeId(recordId);
+    if (!id) return null;
+    const existing = this.read(entityName);
+    return existing.find((item) => this.normalizeId(item) === id) || null;
+  },
+};
+
+const valuesEqual = (left, right) => {
+  if (left === right) return true;
+  if (left == null || right == null) {
+    return left == null && right == null;
+  }
+
+  if (typeof left === 'number' && typeof right === 'string') {
+    return String(left) === right;
+  }
+
+  if (typeof left === 'string' && typeof right === 'number') {
+    return left === String(right);
+  }
+
+  if (typeof left === 'boolean' && typeof right === 'string') {
+    const normalized = right.trim().toLowerCase();
+    if (normalized === 'true') return left === true;
+    if (normalized === 'false') return left === false;
+    return false;
+  }
+
+  if (typeof left === 'string' && typeof right === 'boolean') {
+    const normalized = left.trim().toLowerCase();
+    if (normalized === 'true') return right === true;
+    if (normalized === 'false') return right === false;
+    return false;
+  }
+
+  return String(left) === String(right);
+};
+
+const applyOrderingAndLimit = (records, orderBy, limit) => {
+  const result = Array.isArray(records) ? [...records] : [];
+  if (orderBy && result.length > 1) {
+    const desc = orderBy.startsWith('-');
+    const field = desc ? orderBy.slice(1) : orderBy;
+    result.sort((a, b) => {
+      const left = a?.[field];
+      const right = b?.[field];
+      if (left === right) return 0;
+      if (left === undefined) return desc ? 1 : -1;
+      if (right === undefined) return desc ? -1 : 1;
+      if (left > right) return desc ? -1 : 1;
+      if (left < right) return desc ? 1 : -1;
+      return 0;
+    });
+  }
+
+  if (limit && Number.isFinite(Number(limit))) {
+    return result.slice(0, Number(limit));
+  }
+  return result;
+};
+
 // Token management
 let authToken = storage.getItem('recims_token') || null;
 
@@ -124,58 +242,29 @@ const auth = {
 
 // Entity API factory
 function createEntityAPI(entityName) {
-  const valuesEqual = (left, right) => {
-    if (left === right) return true;
-    if (left == null || right == null) {
-      return left == null && right == null;
-    }
-
-    if (typeof left === 'number' && typeof right === 'string') {
-      return String(left) === right;
-    }
-
-    if (typeof left === 'string' && typeof right === 'number') {
-      return left === String(right);
-    }
-
-    if (typeof left === 'boolean' && typeof right === 'string') {
-      const normalized = right.trim().toLowerCase();
-      if (normalized === 'true') return left === true;
-      if (normalized === 'false') return left === false;
-      return false;
-    }
-
-    if (typeof left === 'string' && typeof right === 'boolean') {
-      const normalized = left.trim().toLowerCase();
-      if (normalized === 'true') return right === true;
-      if (normalized === 'false') return right === false;
-      return false;
-    }
-
-    return String(left) === String(right);
-  };
-
   return {
     async list(orderBy, limit) {
-      const entities = await fetchAPI(`/entities/${entityName}`);
-      
-      // Apply ordering and limit client-side for now
-      if (orderBy) {
-        const desc = orderBy.startsWith('-');
-        const field = desc ? orderBy.slice(1) : orderBy;
-        entities.sort((a, b) => {
-          if (desc) {
-            return b[field] > a[field] ? 1 : -1;
+      try {
+        const entities = await fetchAPI(`/entities/${entityName}`);
+        const normalized = Array.isArray(entities) ? entities : [];
+        if (normalized.length > 0) {
+          entityCache.write(entityName, normalized);
+          return applyOrderingAndLimit(normalized, orderBy, limit);
+        } else {
+          const cached = entityCache.read(entityName);
+          if (cached.length > 0) {
+            return applyOrderingAndLimit(cached, orderBy, limit);
           }
-          return a[field] > b[field] ? 1 : -1;
-        });
+          entityCache.write(entityName, normalized);
+          return applyOrderingAndLimit(normalized, orderBy, limit);
+        }
+      } catch (error) {
+        const cached = entityCache.read(entityName);
+        if (cached.length > 0) {
+          return applyOrderingAndLimit(cached, orderBy, limit);
+        }
+        throw error;
       }
-      
-      if (limit) {
-        return entities.slice(0, limit);
-      }
-      
-      return entities;
     },
 
     async filter(filters, orderBy) {
@@ -197,27 +286,72 @@ function createEntityAPI(entityName) {
     },
 
     async get(id) {
-      return fetchAPI(`/entities/${entityName}/${id}`);
+      try {
+        const entity = await fetchAPI(`/entities/${entityName}/${id}`);
+        if (entity && typeof entity === 'object') {
+          entityCache.upsert(entityName, entity);
+        }
+        return entity;
+      } catch (error) {
+        const cached = entityCache.find(entityName, id);
+        if (cached) {
+          return cached;
+        }
+        throw error;
+      }
     },
 
     async create(data) {
-      return fetchAPI(`/entities/${entityName}`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+      try {
+        const created = await fetchAPI(`/entities/${entityName}`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        if (created && typeof created === 'object') {
+          entityCache.upsert(entityName, created);
+        }
+        return created;
+      } catch (error) {
+        const localRecord = {
+          ...data,
+          id: data?.id ?? `local-${Date.now()}`,
+          __source: 'local-cache',
+        };
+        entityCache.upsert(entityName, localRecord);
+        return localRecord;
+      }
     },
 
     async update(id, data) {
-      return fetchAPI(`/entities/${entityName}/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
+      try {
+        const updated = await fetchAPI(`/entities/${entityName}/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        });
+        if (updated && typeof updated === 'object') {
+          entityCache.upsert(entityName, updated);
+        } else {
+          entityCache.upsert(entityName, { ...(data || {}), id });
+        }
+        return updated;
+      } catch (error) {
+        const fallback = { ...(data || {}), id, __source: 'local-cache' };
+        entityCache.upsert(entityName, fallback);
+        return fallback;
+      }
     },
 
     async delete(id) {
-      return fetchAPI(`/entities/${entityName}/${id}`, {
-        method: 'DELETE',
-      });
+      try {
+        const result = await fetchAPI(`/entities/${entityName}/${id}`, {
+          method: 'DELETE',
+        });
+        entityCache.remove(entityName, id);
+        return result;
+      } catch (error) {
+        entityCache.remove(entityName, id);
+        return { message: 'Deleted locally', __source: 'local-cache' };
+      }
     },
   };
 }
