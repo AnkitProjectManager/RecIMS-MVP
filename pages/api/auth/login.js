@@ -5,7 +5,15 @@ const { init } = require('../../../lib/db')
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this'
 
 export default function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end()
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Allow', 'POST, OPTIONS')
+    return res.status(204).end()
+  }
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST, OPTIONS')
+    return res.status(405).json({ error: 'Method Not Allowed' })
+  }
 
   const db = init()
   try {
