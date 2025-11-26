@@ -16,7 +16,8 @@ export default function Login() {
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     setError("");
     setIsLoading(true);
 
@@ -28,7 +29,8 @@ export default function Login() {
       navigate("/Dashboard");
     } catch (err) {
       console.error("Login error:", err);
-      setError(err.message || "Invalid email or password. Please try again.");
+      const message = err?.message || "Invalid email or password. Please try again.";
+      setError(message === "Method Not Allowed" ? "Unable to reach the login service. Please try again." : message);
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +88,7 @@ export default function Login() {
           </CardHeader>
 
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
               {error && (
                 <Alert variant="destructive" className="border-red-500/60 bg-red-50 text-red-800">
                   <AlertCircle className="h-4 w-4" />
@@ -138,7 +140,8 @@ export default function Login() {
               </div>
 
               <Button
-                type="submit"
+                type="button"
+                onClick={handleSubmit}
                 className="w-full h-12 text-base font-semibold bg-emerald-600 hover:bg-emerald-700"
                 disabled={isLoading}
               >
@@ -154,6 +157,7 @@ export default function Login() {
                   </>
                 )}
               </Button>
+              <button type="submit" className="hidden" aria-hidden="true" tabIndex={-1} />
             </form>
           </CardContent>
         </Card>
