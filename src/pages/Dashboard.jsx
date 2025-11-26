@@ -296,9 +296,12 @@ function DashboardContent({ user }) {
         status: 'active'
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['activeShift'] });
-      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary'] });
+    onSuccess: (createdShift) => {
+      if (createdShift) {
+        queryClient.setQueryData(['activeShift', user?.email], createdShift);
+      }
+      queryClient.invalidateQueries({ queryKey: ['activeShift', user?.email] });
+      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary', user?.email] });
     },
     onError: (error) => {
       console.error('Failed to start shift:', error);
@@ -313,9 +316,10 @@ function DashboardContent({ user }) {
         updated_date: new Date().toISOString()
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['activeShift'] });
-      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary'] });
+    onSuccess: (completedShift) => {
+      queryClient.setQueryData(['activeShift', user?.email], null);
+      queryClient.invalidateQueries({ queryKey: ['activeShift', user?.email] });
+      queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary', user?.email] });
     },
     onError: (error) => {
       console.error('Failed to end shift:', error);
