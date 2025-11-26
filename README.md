@@ -5,12 +5,13 @@ A Vite+React app for warehouse and inventory management.
 
 ## Persistent storage configuration
 
-The API layer now connects to a managed PostgreSQL instance whenever the following environment variables are present:
+The API layer now connects to a managed PostgreSQL instance whenever either of the following is configured:
 
 - `DATABASE_URL` – standard Postgres connection string (e.g. `postgres://user:pass@host:5432/recims`).
+- Standard Postgres env parts (`PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, optional `PGPORT`). These map automatically to a connection string so you can reuse secrets that already exist in Amplify/AWS.
 - `DATABASE_SSL_MODE` (optional) – one of `disable`, `allow`, `prefer`, `require`, or `strict` (defaults to `require`).
 
-When these variables are omitted the app falls back to the legacy on-disk SQLite database for local development only. No manual migrations are required—schema creation and seed data run automatically on first connection.
+When these variables are omitted the app falls back to the legacy on-disk SQLite database for **local development only**. On any hosted environment you must provide Postgres credentials; otherwise API routes will seed a fresh SQLite file per Lambda and your changes will evaporate across requests. Use `GET /api/debug-env` to confirm the active driver (`persistenceMode` will report `postgres` when things are wired correctly).
 
 ## File uploads
 
