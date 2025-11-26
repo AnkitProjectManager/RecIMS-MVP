@@ -15,6 +15,163 @@ const storage = typeof window !== 'undefined'
       removeItem: () => {},
     };
 
+const FALLBACK_ENTITY_KEY = 'recims_fallback_entities';
+const FALLBACK_UPLOAD_KEY = 'recims_fallback_uploads';
+
+function safeParseJSON(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function normalizeEntityKey(name) {
+  return (name || '').toString().trim().toLowerCase();
+}
+
+function getFallbackEntityMap() {
+  return safeParseJSON(storage.getItem(FALLBACK_ENTITY_KEY), {});
+}
+
+function saveFallbackEntityMap(map) {
+  try {
+    storage.setItem(FALLBACK_ENTITY_KEY, JSON.stringify(map));
+  } catch (error) {
+    // Ignore storage quota or privacy-mode failures silently
+  }
+}
+
+function readFallbackList(entityName) {
+  const map = getFallbackEntityMap();
+  const records = map[normalizeEntityKey(entityName)] || [];
+  return Array.isArray(records) ? records.map((item) => ({ ...item })) : [];
+}
+
+function writeFallbackList(entityName, list) {
+  const map = getFallbackEntityMap();
+  map[normalizeEntityKey(entityName)] = Array.isArray(list)
+    ? list.map((item) => ({ ...item }))
+    : [];
+  saveFallbackEntityMap(map);
+}
+
+function generateClientId() {
+  return `tmp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function upsertFallbackRecord(entityName, record) {
+  const list = readFallbackList(entityName);
+  const now = new Date().toISOString();
+  const normalizedId = record?.id != null ? String(record.id) : null;
+
+  let target = { ...record };
+  if (!normalizedId) {
+    target.id = generateClientId();
+  } else {
+    target.id = normalizedId;
+  }
+
+  const existingIndex = list.findIndex((item) => String(item.id) === target.id);
+  if (existingIndex >= 0) {
+    const existing = list[existingIndex];
+    target = {
+      ...existing,
+      ...target,
+      id: existing.id,
+      created_date: existing.created_date || target.created_date || now,
+      updated_date: now,
+    };
+    list[existingIndex] = target;
+  } else {
+    if (!target.created_date) {
+      target.created_date = now;
+    }
+    target.updated_date = now;
+    list.push(target);
+  }
+
+  writeFallbackList(entityName, list);
+  return { ...target };
+}
+
+function removeFallbackRecord(entityName, id) {
+  const list = readFallbackList(entityName);
+  const filtered = list.filter((item) => String(item.id) !== String(id));
+  writeFallbackList(entityName, filtered);
+}
+
+function getFallbackUploadsMap() {
+  return safeParseJSON(storage.getItem(FALLBACK_UPLOAD_KEY), {});
+}
+
+function saveFallbackUploadsMap(map) {
+  try {
+    storage.setItem(FALLBACK_UPLOAD_KEY, JSON.stringify(map));
+  } catch (error) {
+    // Ignore storage quota or privacy-mode failures silently
+  }
+}
+
+function storeFallbackUpload({ dataUrl, fileName, mimeType }) {
+  const uploads = getFallbackUploadsMap();
+  const id = generateClientId();
+  uploads[id] = {
+    id,
+    file_name: fileName,
+    mime_type: mimeType,
+    data_url: dataUrl,
+    created_at: new Date().toISOString(),
+  };
+  saveFallbackUploadsMap(uploads);
+  return {
+    file_url: dataUrl,
+    file_id: id,
+    file_name: fileName,
+    mime_type: mimeType,
+    stored: 'local',
+  };
+}
+
+function sortEntities(entities, orderBy) {
+  const results = Array.isArray(entities) ? [...entities] : [];
+  if (!orderBy) {
+    return results;
+  }
+
+  const desc = orderBy.startsWith('-');
+  const field = desc ? orderBy.slice(1) : orderBy;
+  return results.sort((a, b) => {
+    const left = a[field];
+    const right = b[field];
+    if (left === right) return 0;
+    if (left == null) return desc ? 1 : -1;
+    if (right == null) return desc ? -1 : 1;
+    if (desc) {
+      return right > left ? 1 : -1;
+    }
+    return left > right ? 1 : -1;
+  });
+}
+
+function logFallback(entityName, action, error) {
+  if (typeof console !== 'undefined' && error) {
+    console.warn(`[recims] Falling back to local data for ${entityName} ${action}`, error);
+  }
+}
+
+function blobToDataUrl(blob) {
+  if (!(blob instanceof Blob)) {
+    return Promise.reject(new Error('Invalid blob provided')); 
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read blob')); 
+    reader.readAsDataURL(blob);
+  });
+}
+
 // Token management
 let authToken = storage.getItem('recims_token') || null;
 
@@ -160,25 +317,17 @@ function createEntityAPI(entityName) {
 
   return {
     async list(orderBy, limit) {
-      const entities = await fetchAPI(`/entities/${entityName}`);
-      
-      // Apply ordering and limit client-side for now
-      if (orderBy) {
-        const desc = orderBy.startsWith('-');
-        const field = desc ? orderBy.slice(1) : orderBy;
-        entities.sort((a, b) => {
-          if (desc) {
-            return b[field] > a[field] ? 1 : -1;
-          }
-          return a[field] > b[field] ? 1 : -1;
-        });
+      try {
+        const entities = await fetchAPI(`/entities/${entityName}`);
+        const normalized = Array.isArray(entities) ? entities : [];
+        const sorted = sortEntities(normalized, orderBy);
+        writeFallbackList(entityName, sorted);
+        return limit ? sorted.slice(0, limit) : sorted;
+      } catch (error) {
+        logFallback(entityName, 'list', error);
+        const fallback = sortEntities(readFallbackList(entityName), orderBy);
+        return limit ? fallback.slice(0, limit) : fallback;
       }
-      
-      if (limit) {
-        return entities.slice(0, limit);
-      }
-      
-      return entities;
     },
 
     async filter(filters, orderBy) {
@@ -200,27 +349,69 @@ function createEntityAPI(entityName) {
     },
 
     async get(id) {
-      return fetchAPI(`/entities/${entityName}/${id}`);
+      try {
+        const entity = await fetchAPI(`/entities/${entityName}/${id}`);
+        if (entity && typeof entity === 'object' && !Array.isArray(entity)) {
+          upsertFallbackRecord(entityName, entity);
+        }
+        return entity;
+      } catch (error) {
+        logFallback(entityName, `get(${id})`, error);
+        const fallback = readFallbackList(entityName).find((item) => String(item.id) === String(id));
+        if (fallback) {
+          return { ...fallback };
+        }
+        throw error;
+      }
     },
 
     async create(data) {
-      return fetchAPI(`/entities/${entityName}`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+      try {
+        const created = await fetchAPI(`/entities/${entityName}`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+        if (created && typeof created === 'object') {
+          upsertFallbackRecord(entityName, created);
+          return created;
+        }
+        const fallbackRecord = upsertFallbackRecord(entityName, { ...data });
+        return fallbackRecord;
+      } catch (error) {
+        logFallback(entityName, 'create', error);
+        return upsertFallbackRecord(entityName, { ...data });
+      }
     },
 
     async update(id, data) {
-      return fetchAPI(`/entities/${entityName}/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
+      try {
+        const payload = await fetchAPI(`/entities/${entityName}/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        });
+        const normalized = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload
+          : { ...data, id };
+        upsertFallbackRecord(entityName, normalized);
+        return normalized;
+      } catch (error) {
+        logFallback(entityName, `update(${id})`, error);
+        return upsertFallbackRecord(entityName, { ...data, id });
+      }
     },
 
     async delete(id) {
-      return fetchAPI(`/entities/${entityName}/${id}`, {
-        method: 'DELETE',
-      });
+      try {
+        const result = await fetchAPI(`/entities/${entityName}/${id}`, {
+          method: 'DELETE',
+        });
+        removeFallbackRecord(entityName, id);
+        return result ?? id;
+      } catch (error) {
+        logFallback(entityName, `delete(${id})`, error);
+        removeFallbackRecord(entityName, id);
+        return id;
+      }
     },
   };
 }
@@ -309,6 +500,7 @@ const integrations = {
       let uploadBlob = file;
       let uploadName = fileName || (typeof file === 'object' && file?.name) || 'upload';
       let inferredMime = mimeType || (typeof file === 'object' && file?.type) || 'application/octet-stream';
+      const originalDataUrl = typeof file === 'string' && file.startsWith('data:') ? file : null;
 
       if (typeof file === 'string') {
         let base64Data = file;
@@ -347,21 +539,38 @@ const integrations = {
         headers['Authorization'] = `Bearer ${authToken}`;
       }
 
-      const response = await fetch(`${API_URL}/files/upload`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
+      try {
+        const response = await fetch(`${API_URL}/files/upload`, {
+          method: 'POST',
+          headers,
+          body: formData,
+        });
 
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || 'File upload failed';
-        const error = new Error(message);
-        error.status = response.status;
-        throw error;
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = payload?.error || 'File upload failed';
+          const error = new Error(message);
+          error.status = response.status;
+          throw error;
+        }
+
+        return payload || {};
+      } catch (error) {
+        console.warn('[recims] Upload failed, using local fallback storage', error);
+        try {
+          let dataUrl = originalDataUrl;
+          if (!dataUrl) {
+            dataUrl = await blobToDataUrl(uploadBlob instanceof Blob ? uploadBlob : new Blob([uploadBlob], { type: inferredMime }));
+          }
+          return storeFallbackUpload({ dataUrl, fileName: uploadName, mimeType: inferredMime });
+        } catch (fallbackError) {
+          // Preserve original error context for debugging
+          if (typeof fallbackError === 'object') {
+            fallbackError.originalError = error;
+          }
+          throw fallbackError;
+        }
       }
-
-      return payload || {};
     },
     async UploadPrivateFile(params) {
       return this.UploadFile(params);
