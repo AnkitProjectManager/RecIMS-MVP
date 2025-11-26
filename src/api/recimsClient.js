@@ -1,7 +1,10 @@
 // RecIMS Standalone API Client
 // Implements direct API calls to the RecIMS backend
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+const API_URL = rawApiUrl.endsWith('/api')
+  ? rawApiUrl.replace(/\/$/, '')
+  : `${rawApiUrl.replace(/\/$/, '')}/api`;
 
 // Use a guard so SSR doesn't access window/localStorage
 const storage = typeof window !== 'undefined'
