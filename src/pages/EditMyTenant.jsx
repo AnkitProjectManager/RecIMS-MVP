@@ -12,6 +12,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Building2, ArrowLeft, Save, Upload, AlertCircle, Palette } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
+import { LOGO_ALLOWED_TYPES, LOGO_MAX_BYTES, uploadTenantLogo } from "@/lib/uploads";
 
 export default function EditMyTenant() {
   const navigate = useNavigate();
@@ -20,6 +22,8 @@ export default function EditMyTenant() {
   const [success, setSuccess] = useState(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = React.useRef(null);
+  const { toast } = useToast();
+  const logoAccept = React.useMemo(() => LOGO_ALLOWED_TYPES.join(','), []);
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -93,12 +97,18 @@ export default function EditMyTenant() {
     setUploadingLogo(true);
     setError(null);
     try {
-      const { file_url } = await recims.integrations.Core.UploadFile({ file });
-      setFormData(prev => ({ ...prev, branding_logo_url: file_url }));
-      setSuccess("Logo uploaded! Click 'Save Changes' to apply.");
+      const { fileUrl } = await uploadTenantLogo(file, {
+        fileName: `tenant-${tenant?.tenant_id || tenant?.id || 'logo'}`,
+      });
+      setFormData(prev => ({ ...prev, branding_logo_url: fileUrl }));
+      const message = "Logo uploaded! Click 'Save Changes' to apply.";
+      setSuccess(message);
+      toast({ title: 'Logo uploaded', description: message });
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError("Failed to upload logo");
+      const message = err?.message || 'Failed to upload logo';
+      setError(message);
+      toast({ title: 'Upload failed', description: message, variant: 'destructive' });
       setTimeout(() => setError(null), 3000);
     } finally {
       setUploadingLogo(false);
@@ -335,7 +345,7 @@ export default function EditMyTenant() {
                 <input
                   ref={logoInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={logoAccept}
                   onChange={(e) => e.target.files?.[0] && handleLogoUpload(e.target.files[0])}
                   className="hidden"
                 />
@@ -356,6 +366,9 @@ export default function EditMyTenant() {
                     {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
                   </Button>
                 </div>
+                <p className="text-xs text-gray-500">
+                  Supported: PNG, JPG, SVG, WebP · Max {(LOGO_MAX_BYTES / (1024 * 1024)).toFixed(0)}MB
+                </p>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4">

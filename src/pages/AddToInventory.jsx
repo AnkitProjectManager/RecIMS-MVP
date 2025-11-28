@@ -15,6 +15,41 @@ import { Package, ArrowLeft, Save, CheckCircle2, Info, Sparkles, Loader2, AlertC
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import BinLocationSuggestion from "@/components/ai/BinLocationSuggestion";
 
+const DEFAULT_MATERIAL_HIERARCHY = {
+  'NON-FERROUS': {
+    label: 'Non-Ferrous Metals',
+    subCategories: {
+      Aluminum: ['Extrusion 6063', 'Plate 5052', 'Billet 6000 Series'],
+      Copper: ['Bare Bright Wire', 'Bus Bar Segments', 'Anode Scrap'],
+      Brass: ['Free-Cutting Rod', 'Cartridge Sheet']
+    },
+  },
+  'FERROUS': {
+    label: 'Ferrous Steel',
+    subCategories: {
+      'Stainless Steel': ['304 Seamless Pipe', '316L Plate', '410 Bar'],
+      'Carbon Steel': ['Hot Rolled Coil', 'Cold Finished Bar'],
+      'Tool Steel': ['D2 Block', 'A2 Round']
+    },
+  },
+  'PLASTICS': {
+    label: 'Engineering Plastics',
+    subCategories: {
+      'Nylon 66': ['GF30 Pellets', 'Cast Sheet'],
+      Polycarbonate: ['Optical Grade Pellets', 'Regrind Flake'],
+      'Mixed Bales': ['Unsorted Feedstock', 'Post-Consumer Blend']
+    },
+  },
+  'SPECIALTY': {
+    label: 'Specialty & Mixed Metals',
+    subCategories: {
+      'Shop Turnings': ['Baled Turnings', 'Loose Turnings'],
+      'Super Alloys': ['Inconel Scrap', 'Titanium Ti-6Al-4V'],
+      Electronics: ['Server Boards', 'Connector Pins']
+    },
+  },
+};
+
 export default function AddToInventory() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -100,6 +135,18 @@ export default function AddToInventory() {
     initialData: [],
   });
 
+  const { data: materialCategories = [] } = useQuery({
+    queryKey: ['materialCategories', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.MaterialCategory.filter({
+        tenant_id: user.tenant_id
+      });
+    },
+    enabled: !!user?.tenant_id,
+    initialData: [],
+  });
+
   const { data: skus = [] } = useQuery({
     queryKey: ['productSKUs', user?.tenant_id],
     queryFn: async () => {
@@ -113,14 +160,56 @@ export default function AddToInventory() {
     initialData: [],
   });
 
+  const categoryLabelLookup = React.useMemo(() => {
+    const labels = materialCategories.reduce((acc, cat) => {
+      const value = cat.category_code || cat.category_name;
+      if (value) {
+        acc[value] = cat.category_name || value;
+      }
+      return acc;
+    }, {});
+
+    Object.entries(DEFAULT_MATERIAL_HIERARCHY).forEach(([code, meta]) => {
+      if (!labels[code]) {
+        labels[code] = meta.label || code;
+      }
+    });
+
+    return labels;
+  }, [materialCategories]);
+
   const availableCategories = React.useMemo(() => {
-    return [...new Set(skus.map(sku => sku.category))];
-  }, [skus]);
+    const fromSkus = [...new Set(skus.map(sku => sku.category).filter(Boolean))];
+    if (fromSkus.length > 0) {
+      return fromSkus;
+    }
+
+    const fromMaterialCategories = materialCategories
+      .map(cat => cat.category_code || cat.category_name)
+      .filter(Boolean);
+    if (fromMaterialCategories.length > 0) {
+      return [...new Set(fromMaterialCategories)];
+    }
+
+    return Object.keys(DEFAULT_MATERIAL_HIERARCHY);
+  }, [skus, materialCategories]);
 
   const availableSubCategories = React.useMemo(() => {
     if (!formData.category) return [];
     const filtered = skus.filter(sku => sku.category === formData.category);
-    return [...new Set(filtered.map(sku => sku.sub_category))];
+    const fromSkus = [...new Set(filtered.map(sku => sku.sub_category).filter(Boolean))];
+    if (fromSkus.length > 0) {
+      return fromSkus;
+    }
+
+    const fallbackSubs = Object.keys(
+      DEFAULT_MATERIAL_HIERARCHY[formData.category]?.subCategories || {}
+    );
+    if (fallbackSubs.length > 0) {
+      return fallbackSubs;
+    }
+
+    return [];
   }, [skus, formData.category]);
 
   const availableProductTypes = React.useMemo(() => {
@@ -129,7 +218,14 @@ export default function AddToInventory() {
       sku.category === formData.category &&
       sku.sub_category === formData.sub_category
     );
-    return [...new Set(filtered.map(sku => sku.product_type))];
+    const fromSkus = [...new Set(filtered.map(sku => sku.product_type).filter(Boolean))];
+    if (fromSkus.length > 0) {
+      return fromSkus;
+    }
+
+    const fallbackTypes =
+      DEFAULT_MATERIAL_HIERARCHY[formData.category]?.subCategories?.[formData.sub_category] || [];
+    return fallbackTypes;
   }, [skus, formData.category, formData.sub_category]);
 
   const convertToKg = (lbs) => lbs * 0.453592;
@@ -514,7 +610,7 @@ export default function AddToInventory() {
                   <SelectContent>
                     {availableCategories.map((cat) => (
                       <SelectItem key={cat} value={cat}>
-                        {cat}
+                        {categoryLabelLookup[cat] || cat}
                       </SelectItem>
                     ))}
                   </SelectContent>

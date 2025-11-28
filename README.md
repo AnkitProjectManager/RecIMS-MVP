@@ -38,6 +38,30 @@ Both operations require a valid JWT for an `admin` or `super_admin` account. The
 
 Set `NEXT_PUBLIC_PERSISTENCE_MODE=degraded` (and optionally `NEXT_PUBLIC_PERSISTENCE_MESSAGE`) to surface a dismissible alert for administrators inside the UI, reminding them that saves are temporarily cached. Use `NEXT_PUBLIC_PERSISTENCE_MODE=normal` to disable the banner.
 
+## Demo seed data & offline dropdowns
+
+The UI bootstraps rich demo data via `ensureSeedDataLoaded()` (called from both `pages/_app.jsx` and `src/App.jsx`). The loader tracks a `recims:seed-data-version` flag in `localStorage` and now clears it automatically:
+
+- **Development:** every reload wipes the flag so fresh seeds are written after each code change.
+- **Production builds:** the flag is invalidated whenever the Next.js build ID (or commit SHA) changes, so each deploy rehydrates the latest fixtures without manual steps.
+
+Manual refresh is rarely needed, but if you want to force it:
+
+1. Open DevTools → Console.
+2. Run `localStorage.removeItem('recims:seed-data-version')`.
+3. Refresh the page so `ensureSeedDataLoaded()` can write the latest fixtures.
+
+### What’s included
+
+- Core masters: tenants, tenant categories/contacts, carriers, containers, suppliers, vendors, customers, materials, zones, bins, SKUs, and addresses.
+- Inventory objects: stock positions with bin + zone metadata, alert settings, inventory alerts, audit trails, QC criteria/inspections, shift logs, and KPI report history.
+- Procurement & shipping: purchase orders plus fully-described line items (skids, actual/certified weights, certificate references), inbound shipments, outbound shipments, waybills/items, and carrier integrations.
+- Compliance & communications: destruction/compliance certificates (draft/issued/sent states), signature requests, email templates, QBO connections, and sample audit notes so analytics, certificates, and email screens all have meaningful dropdown choices.
+
+These seeds mirror the entity names registered inside `recimsClient`, so every TanStack Query lookup has at least one cached record even when the API is offline.
+
+The client now merges any successful API responses with the cached entities instead of overwriting them, so data created locally (or provided via seeds) remains available after refreshes, logouts, or other navigation—even if the backend responds with an empty payload. Remote data still wins when an ID matches, but cached-only records stick around for offline/demo flows.
+
 ## Running the app
 
 ```bash

@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { format, subDays, differenceInMinutes } from "date-fns";
 import { useTenant } from "@/components/TenantContext";
+import { getThemePalette, withAlpha } from "@/lib/theme";
 
 export default function Dashboard() {
   const [user, setUser] = React.useState(null);
@@ -155,17 +156,43 @@ export default function Dashboard() {
 // Separate component for the main dashboard content
 function DashboardContent({ user }) {
   const queryClient = useQueryClient();
-  const { tenantConfig } = useTenant();
+  const { tenantConfig, theme } = useTenant();
   const [shiftTick, setShiftTick] = React.useState(Date.now());
-
-  const neumorph = {
-    base: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[8px_8px_16px_#d1d5db,-8px_-8px_16px_#ffffff]',
-    card: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[8px_8px_16px_#d1d5db,-8px_-8px_16px_#ffffff] border-0',
-    button: 'bg-gradient-to-br from-gray-50 to-gray-100 shadow-[4px_4px_8px_#d1d5db,-4px_-4px_8px_#ffffff] hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] border-0',
-    iconBg: 'bg-gradient-to-br from-gray-100 to-gray-200 shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff]',
-    rounded: 'rounded-2xl',
-    roundedLg: 'rounded-3xl'
-  };
+  const palette = React.useMemo(() => getThemePalette(theme), [theme]);
+  const dashboardBackgroundStyle = React.useMemo(
+    () => ({
+      backgroundImage: `linear-gradient(180deg, ${withAlpha(palette.primaryColor, 0.08)} 0%, #f8fafc 55%, ${withAlpha(palette.secondaryColor, 0.08)} 100%)`,
+    }),
+    [palette]
+  );
+  const accentTextStyle = React.useMemo(
+    () => ({ color: palette.primaryColor }),
+    [palette.primaryColor]
+  );
+  const heroTextColor = palette.heroTextColor || '#0F172A';
+  const heroTextStyle = React.useMemo(
+    () => ({ color: heroTextColor }),
+    [heroTextColor]
+  );
+  const heroMutedTextStyle = React.useMemo(
+    () => ({ color: withAlpha(heroTextColor, 0.78) }),
+    [heroTextColor]
+  );
+  const heroSubtleTextStyle = React.useMemo(
+    () => ({ color: withAlpha(heroTextColor, 0.62) }),
+    [heroTextColor]
+  );
+  const themedSurfaces = React.useMemo(
+    () => ({
+      base: 'tenant-surface',
+      hero: 'tenant-surface-strong',
+      rounded: 'rounded-2xl',
+      roundedLg: 'rounded-3xl',
+      icon: 'tenant-icon',
+      chip: 'tenant-chip',
+    }),
+    []
+  );
 
   const { data: activeShift } = useQuery({
     queryKey: ['activeShift', user?.email],
@@ -546,19 +573,19 @@ function DashboardContent({ user }) {
   console.log('Dashboard: Rendering content');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8" style={dashboardBackgroundStyle}>
       <div className="max-w-7xl mx-auto">
 
       {/* Shift Control */}
-      <Card className={`mb-6 ${neumorph.card} ${neumorph.roundedLg}`}>
+      <Card className={`mb-6 ${themedSurfaces.hero} ${themedSurfaces.roundedLg}`}>
         <CardContent className="p-4 md:p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-black">
                 {activeShift ? 'Shift Active' : 'No Active Shift'}
               </h2>
               {activeShift && (
-                <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                <div className="flex items-center gap-4 mt-2 text-sm" style={heroMutedTextStyle}>
                   <div className="flex items-center gap-1">
                     <Clock className="w-4 h-4" />
                     <span>Duration: {getShiftDuration()}</span>
@@ -567,17 +594,17 @@ function DashboardContent({ user }) {
                 </div>
               )}
               {user?.email && (
-                <div className="mt-3 text-xs text-gray-600 space-y-1">
+                <div className="mt-3 text-xs space-y-1">
                   {lastShiftDuration && (
-                    <div>
-                      <span className="font-medium text-gray-700">Last Shift:</span> {lastShiftDuration}
+                    <div className="text-black">
+                      <span className="font-medium text-black">Last Shift:</span> {lastShiftDuration}
                       {lastShiftEndedAt && (
-                        <span className="text-gray-500"> · Ended {lastShiftEndedAt}</span>
+                        <span className="text-black"> · Ended {lastShiftEndedAt}</span>
                       )}
                     </div>
                   )}
-                  <div>
-                    <span className="font-medium text-gray-700">Total Logged:</span> {totalShiftDurationDisplay}
+                  <div className="text-black">
+                    <span className="font-medium text-black">Total Logged:</span> {totalShiftDurationDisplay}
                   </div>
                 </div>
               )}
@@ -589,7 +616,7 @@ function DashboardContent({ user }) {
                   endShiftMutation.mutate();
                 }}
                 disabled={endShiftMutation.isPending || !canEndShift}
-                className={`${neumorph.button} gap-2 text-red-600 hover:text-red-700`}
+                className="gap-2 rounded-2xl bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg hover:opacity-95 border-0"
               >
                 <StopCircle className="w-4 h-4" />
                 End Shift
@@ -601,8 +628,7 @@ function DashboardContent({ user }) {
                   startShiftMutation.mutate();
                 }}
                 disabled={startShiftMutation.isPending || !canStartShift}
-                className={`${neumorph.button} gap-2`}
-                style={{ color: '#388E3C' }}
+                className="gap-2 rounded-2xl tenant-action"
               >
                 <PlayCircle className="w-4 h-4" />
                 Start Shift
@@ -612,18 +638,18 @@ function DashboardContent({ user }) {
         </CardContent>
       </Card>
 
-      {/* Quick Stats - MAKE CLICKABLE */}
+      {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
         <Link to={createPageUrl("InboundShipments")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <TruckIcon className="w-6 h-6" style={{ color: '#388E3C' }} />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <TruckIcon className="w-6 h-6" style={accentTextStyle} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">{todayShipments.length}</p>
-                  <p className="text-xs text-gray-500">{`Today's Loads`}</p>
+                  <p className="text-2xl font-bold text-slate-900">{todayShipments.length}</p>
+                  <p className="text-xs text-slate-600">{`Today's Loads`}</p>
                 </div>
               </div>
             </CardContent>
@@ -631,15 +657,15 @@ function DashboardContent({ user }) {
         </Link>
 
         <Link to={createPageUrl("InboundShipments?status=arrived")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <AlertCircle className="w-6 h-6 text-orange-600" />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <AlertCircle className="w-6 h-6 text-orange-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">{pendingShipments.length}</p>
-                  <p className="text-xs text-gray-500">Pending</p>
+                  <p className="text-2xl font-bold text-slate-900">{pendingShipments.length}</p>
+                  <p className="text-xs text-slate-600">Pending</p>
                 </div>
               </div>
             </CardContent>
@@ -647,15 +673,15 @@ function DashboardContent({ user }) {
         </Link>
 
         <Link to={createPageUrl("BinManagement")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <Warehouse className="w-6 h-6" style={{ color: '#00695C' }} />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <Warehouse className="w-6 h-6" style={{ color: palette.secondaryColor }} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">{availableBins}</p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-2xl font-bold text-slate-900">{availableBins}</p>
+                  <p className="text-xs text-slate-600">
                     {binCapacityEnabled ? 'Available Bins' : 'Available Bins'}
                   </p>
                 </div>
@@ -665,15 +691,15 @@ function DashboardContent({ user }) {
         </Link>
 
         <Link to={createPageUrl("BinManagement?status=full")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <Package className="w-6 h-6 text-red-600" />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <Package className="w-6 h-6 text-red-500" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">{fullBins}</p>
-                  <p className="text-xs text-gray-500">Full Bins</p>
+                  <p className="text-2xl font-bold text-slate-900">{fullBins}</p>
+                  <p className="text-xs text-slate-600">Full Bins</p>
                 </div>
               </div>
             </CardContent>
@@ -681,15 +707,15 @@ function DashboardContent({ user }) {
         </Link>
 
         <Link to={createPageUrl("InventoryManagement")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <DollarSign className="w-6 h-6" style={{ color: '#1976D2' }} />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <DollarSign className="w-6 h-6" style={accentTextStyle} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">${(totalInventoryValue / 1000).toFixed(1)}K</p>
-                  <p className="text-xs text-gray-500">Inventory Value</p>
+                  <p className="text-2xl font-bold text-slate-900">${(totalInventoryValue / 1000).toFixed(1)}K</p>
+                  <p className="text-xs text-slate-600">Inventory Value</p>
                 </div>
               </div>
             </CardContent>
@@ -697,15 +723,15 @@ function DashboardContent({ user }) {
         </Link>
 
         <Link to={createPageUrl("SalesOrderManagement")}>
-          <Card className={`${neumorph.card} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all cursor-pointer ${neumorph.rounded}`}>
+          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${neumorph.iconBg}`}>
-                  <TrendingUp className="w-6 h-6" style={{ color: '#388E3C' }} />
+                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                  <TrendingUp className="w-6 h-6" style={accentTextStyle} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">${(totalSalesYTD / 1000).toFixed(1)}K</p>
-                  <p className="text-xs text-gray-500">Sales YTD</p>
+                  <p className="text-2xl font-bold text-slate-900">${(totalSalesYTD / 1000).toFixed(1)}K</p>
+                  <p className="text-xs text-slate-600">Sales YTD</p>
                 </div>
               </div>
             </CardContent>
@@ -714,38 +740,38 @@ function DashboardContent({ user }) {
       </div>
 
       {/* Quick Actions */}
-      <Card className={`mb-6 ${neumorph.card} ${neumorph.roundedLg}`}>
+      <Card className={`mb-6 ${themedSurfaces.base} ${themedSurfaces.roundedLg}`}>
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Link to={createPageUrl("NewShipment")}>
-              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#26A69A' }}>
+              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <TruckIcon className="w-6 h-6" />
                 <span className="text-sm font-semibold">New Inbound</span>
               </Button>
             </Link>
             <Link to={createPageUrl("MaterialClassification")}>
-              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#388E3C' }}>
+              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <Package className="w-6 h-6" />
                 <span className="text-sm font-semibold">Classify</span>
               </Button>
             </Link>
             <Link to={getInventoryActionUrl()}>
-              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#00695C' }}>
+              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <Package className="w-6 h-6" />
                 <span className="text-sm font-semibold">{getInventoryActionLabel()}</span>
               </Button>
             </Link>
             <Link to={createPageUrl("Reports")}>
-              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#1C262E' }}>
+              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <BarChart3 className="w-6 h-6" />
                 <span className="text-sm font-semibold">Reports</span>
               </Button>
             </Link>
             <a href={recims.agents.getWhatsAppConnectURL('reports_assistant')} target="_blank" rel="noopener noreferrer">
-              <Button className={`w-full h-20 flex flex-col gap-2 ${neumorph.button} ${neumorph.rounded}`} style={{ color: '#25D366' }}>
+              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <MessageCircle className="w-6 h-6" />
                 <span className="text-sm font-semibold">AI Assistant</span>
               </Button>
@@ -755,7 +781,7 @@ function DashboardContent({ user }) {
       </Card>
 
       {/* Pending Shipments */}
-      <Card className={`${neumorph.card} ${neumorph.roundedLg}`}>
+      <Card className={`${themedSurfaces.base} ${themedSurfaces.roundedLg}`}>
         <CardHeader>
           <CardTitle>Recent Inbound Shipments</CardTitle>
         </CardHeader>
@@ -768,7 +794,7 @@ function DashboardContent({ user }) {
           ) : (
             <div className="space-y-3">
               {pendingShipments.slice(0, 5).map((shipment) => (
-                <div key={shipment.id} className={`flex items-center justify-between p-3 ${neumorph.base} ${neumorph.rounded} hover:shadow-[inset_4px_4px_8px_#d1d5db,inset_-4px_-4px_8px_#ffffff] transition-all`}>
+                <div key={shipment.id} className={`flex items-center justify-between p-3 ${themedSurfaces.base} ${themedSurfaces.rounded} hover:shadow-lg transition-all`}>
                   <div className="flex-1">
                     <p className="font-semibold">{shipment.load_id}</p>
                     <p className="text-sm text-gray-600">
@@ -780,8 +806,8 @@ function DashboardContent({ user }) {
                       {shipment.status}
                     </Badge>
                     <Link to={createPageUrl(`PrintInboundLabel?id=${shipment.id}`)}>
-                      <Button className={`h-8 w-8 ${neumorph.button} ${neumorph.rounded}`} size="icon">
-                        <Printer className="w-4 h-4 text-gray-600" />
+                      <Button className="h-8 w-8 tenant-chip rounded-full border border-white/30 hover:opacity-80" size="icon" variant="ghost">
+                        <Printer className="w-4 h-4 text-white" />
                       </Button>
                     </Link>
                   </div>

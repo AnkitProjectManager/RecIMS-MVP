@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { recims } from "@/api/recimsClient";
 import { useQuery } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
@@ -11,10 +11,18 @@ import { ArrowLeft, Sparkles, Download } from "lucide-react";
 import { format } from "date-fns";
 import InsightsEngine from "@/components/ai/InsightsEngine";
 import MetricsWidget from "@/components/dashboard/MetricsWidget";
+import { getThemePalette, withAlpha } from "@/lib/theme";
 
 export default function AIInsights() {
-  const { tenantConfig, user } = useTenant();
+  const { tenantConfig, user, theme } = useTenant();
   const [generatedInsights, setGeneratedInsights] = useState(null);
+  const palette = useMemo(() => getThemePalette(theme), [theme]);
+  const pageBackgroundStyle = useMemo(
+    () => ({
+      background: `linear-gradient(200deg, ${withAlpha(palette.primaryColor, 0.06)}, #ffffff 45%, ${withAlpha(palette.secondaryColor, 0.06)})`,
+    }),
+    [palette]
+  );
 
   const { data: inventory = [] } = useQuery({
     queryKey: ['inventory', user?.tenant_id],
@@ -146,7 +154,7 @@ export default function AIInsights() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto" style={pageBackgroundStyle}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link to={createPageUrl("Dashboard")}>
@@ -156,14 +164,16 @@ export default function AIInsights() {
           </Link>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <Sparkles className="w-7 h-7 text-purple-600" />
+              <Sparkles className="w-7 h-7" style={{ color: palette.primaryColor }} />
               AI Business Intelligence
             </h1>
             <p className="text-sm text-gray-600">Data-driven insights and recommendations</p>
           </div>
         </div>
         <div className="flex gap-2">
-          <Badge className="bg-purple-600 text-white">AI-POWERED</Badge>
+          <Badge className="text-white" style={{ backgroundColor: palette.primaryColor }}>
+            AI-POWERED
+          </Badge>
           {generatedInsights && (
             <Button onClick={downloadInsights} variant="outline" size="sm">
               <Download className="w-4 h-4 mr-2" />
@@ -205,26 +215,26 @@ export default function AIInsights() {
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <Card>
+        <Card className="tenant-surface">
           <CardContent className="p-4">
             <p className="text-xs text-gray-600 mb-1">Total Inventory Value</p>
-            <p className="text-2xl font-bold text-green-600">
+            <p className="text-2xl font-bold" style={{ color: palette.primaryColor }}>
               ${(inventory.reduce((sum, i) => sum + (i.total_value || 0), 0) / 1000).toFixed(1)}K
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="tenant-surface">
           <CardContent className="p-4">
             <p className="text-xs text-gray-600 mb-1">Available Items</p>
-            <p className="text-2xl font-bold text-blue-600">
+            <p className="text-2xl font-bold" style={{ color: palette.secondaryColor }}>
               {inventory.filter(i => i.status === 'available').length}
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="tenant-surface">
           <CardContent className="p-4">
             <p className="text-xs text-gray-600 mb-1">Avg Quality Grade</p>
-            <p className="text-2xl font-bold text-purple-600">
+            <p className="text-2xl font-bold" style={{ color: palette.primaryColor }}>
               {(() => {
                 const grades = { 'A': 3, 'B': 2, 'C': 1 };
                 const validItems = inventory.filter(i => i.quality_grade);
@@ -237,10 +247,10 @@ export default function AIInsights() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="tenant-surface">
           <CardContent className="p-4">
             <p className="text-xs text-gray-600 mb-1">QC Pass Rate</p>
-            <p className="text-2xl font-bold text-orange-600">
+            <p className="text-2xl font-bold" style={{ color: palette.primaryColor }}>
               {qcInspections.length > 0 
                 ? ((qcInspections.filter(q => q.overall_result === 'pass').length / qcInspections.length) * 100).toFixed(1)
                 : 0}%

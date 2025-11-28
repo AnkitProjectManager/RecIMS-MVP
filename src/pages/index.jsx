@@ -88,7 +88,9 @@ const ViewTenant = lazy(() => import("./ViewTenant"));
 const EditTenant = lazy(() => import("./EditTenant"));
 const TenantUsers = lazy(() => import("./TenantUsers"));
 const EditCustomer = lazy(() => import("./EditCustomer"));
+const ViewCustomer = lazy(() => import("./ViewCustomer"));
 const EditVendor = lazy(() => import("./EditVendor"));
+const ViewVendor = lazy(() => import("./ViewVendor"));
 const EditMyTenant = lazy(() => import("./EditMyTenant"));
 const ManageMaterialCategories = lazy(() => import("./ManageMaterialCategories"));
 const AIInsightsModule = lazy(() => import("./AIInsightsModule"));
@@ -114,7 +116,7 @@ const PAGE_NAMES = [
     'InventoryByLocation', 'InventoryBySKU', 'EditShipment', 'PrintBinQR', 'QBOSetup',
     'PrintQuotation', 'PrintOrderConfirmation', 'SignatureComplete', 'EditSalesOrder',
     'Home', 'ManageTenantCategories', 'TenantConsole', 'CreateTenant', 'ViewTenant',
-    'EditTenant', 'TenantUsers', 'EditCustomer', 'EditVendor', 'EditMyTenant',
+    'EditTenant', 'TenantUsers', 'EditCustomer', 'ViewCustomer', 'EditVendor', 'ViewVendor', 'EditMyTenant',
     'ManageMaterialCategories', 'AIInsightsModule', 'CrossTenantDashboard'
 ];
 
@@ -160,6 +162,22 @@ function PagesContent() {
         }
     }, [hasToken, normalizedPath, navigate]);
 
+    const currentPage = _getCurrentPage(location.pathname);
+
+    useEffect(() => {
+        if (!hasToken) return;
+        const canonicalSlug = currentPage?.replace(/\s+/g, '-');
+        if (!canonicalSlug) return;
+        const activeSlug = location.pathname.replace(/^\/+/, '');
+        if (!activeSlug) return;
+        if (activeSlug === canonicalSlug) return;
+        if (activeSlug.toLowerCase() !== canonicalSlug.toLowerCase()) return;
+
+        const targetPath = `/${canonicalSlug}`;
+        const composed = `${targetPath}${location.search ?? ''}${location.hash ?? ''}`;
+        navigate(composed, { replace: true });
+    }, [currentPage, hasToken, location.pathname, location.search, location.hash, navigate]);
+
     if (!hasToken) {
         return (
             <Suspense fallback={<LoadingFallback />}>
@@ -172,8 +190,6 @@ function PagesContent() {
             </Suspense>
         );
     }
-
-    const currentPage = _getCurrentPage(location.pathname);
 
     return (
         <Layout currentPageName={currentPage}>
@@ -342,8 +358,10 @@ function PagesContent() {
                 <Route path="/TenantUsers" element={<TenantUsers />} />
                 
                 <Route path="/EditCustomer" element={<EditCustomer />} />
+                <Route path="/ViewCustomer" element={<ViewCustomer />} />
                 
                 <Route path="/EditVendor" element={<EditVendor />} />
+                <Route path="/ViewVendor" element={<ViewVendor />} />
                 
                 <Route path="/EditMyTenant" element={<EditMyTenant />} />
                 

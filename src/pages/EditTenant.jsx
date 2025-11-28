@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/use-toast";
+import { LOGO_ALLOWED_TYPES, LOGO_MAX_BYTES, uploadTenantLogo } from "@/lib/uploads";
 
 export default function EditTenant() {
   const navigate = useNavigate();
@@ -26,6 +28,8 @@ export default function EditTenant() {
   const [error, setError] = useState(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = React.useRef(null);
+  const { toast } = useToast();
+  const logoAccept = React.useMemo(() => LOGO_ALLOWED_TYPES.join(','), []);
 
   const urlParams = new URLSearchParams(window.location.search);
   const tenantId = urlParams.get('id');
@@ -149,10 +153,22 @@ export default function EditTenant() {
     setUploadingLogo(true);
     setError(null);
     try {
-      const { file_url } = await recims.integrations.Core.UploadFile({ file });
-      setFormData(prev => ({ ...prev, branding_logo_url: file_url }));
+      const { fileUrl } = await uploadTenantLogo(file, {
+        fileName: `tenant-${tenant?.tenant_id || resolvedTenantId || 'logo'}`,
+      });
+      setFormData(prev => ({ ...prev, branding_logo_url: fileUrl }));
+      toast({
+        title: 'Logo updated',
+        description: 'Save changes to keep this logo.',
+      });
     } catch (err) {
-      setError("Failed to upload logo");
+      const message = err?.message || 'Failed to upload logo';
+      setError(message);
+      toast({
+        title: 'Upload failed',
+        description: message,
+        variant: 'destructive',
+      });
     } finally {
       setUploadingLogo(false);
     }
@@ -545,7 +561,7 @@ export default function EditTenant() {
                   <input
                     ref={logoInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={logoAccept}
                     onChange={(e) => e.target.files?.[0] && handleLogoUpload(e.target.files[0])}
                     className="hidden"
                   />
@@ -567,6 +583,9 @@ export default function EditTenant() {
                       {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
                     </Button>
                   </div>
+                  <p className="text-xs text-gray-500">
+                    Supported: PNG, JPG, SVG, WebP · Max {(LOGO_MAX_BYTES / (1024 * 1024)).toFixed(0)}MB
+                  </p>
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-4">

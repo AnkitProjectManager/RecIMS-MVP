@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,8 @@ import {
   Mail,
   Building2,
   DollarSign,
-  Trash2
+  Trash2,
+  Pencil,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -218,7 +219,7 @@ export default function CustomerManagement() {
             <Card 
               key={customer.id} 
               className="hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => navigate(createPageUrl(`EditCustomer?id=${customer.id}`))}
+              onClick={() => navigate(createPageUrl(`ViewCustomer?id=${customer.id}`))}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
@@ -289,6 +290,18 @@ export default function CustomerManagement() {
                         Total: ${customer.total_purchases.toFixed(2)}
                       </p>
                     )}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-2"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        navigate(createPageUrl(`EditCustomer?id=${customer.id}`));
+                      }}
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Edit
+                    </Button>
                     <Button
                       variant="destructive"
                       size="sm"

@@ -94,6 +94,19 @@ export default function InventoryManagement() {
     initialData: [],
   });
 
+  const { data: materialCategories = [] } = useQuery({
+    queryKey: ['materialCategories', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.MaterialCategory.filter({
+        tenant_id: user.tenant_id,
+        is_active: true
+      }, '-created_date', 200);
+    },
+    enabled: !!user?.tenant_id,
+    initialData: [],
+  });
+
   const { data: settings = [] } = useQuery({
     queryKey: ['appSettings'],
     queryFn: () => recims.entities.AppSettings.list(),
@@ -145,7 +158,14 @@ export default function InventoryManagement() {
   });
 
   // Get unique values for filters
-  const uniqueCategories = [...new Set(activeInventory.map(i => i.category).filter(Boolean))];
+  const inventoryCategories = [...new Set(activeInventory.map(i => i.category).filter(Boolean))];
+  const configuredCategories = materialCategories
+    .map(cat => cat.category_name)
+    .filter(Boolean);
+  const uniqueCategories = Array.from(new Set([
+    ...configuredCategories,
+    ...inventoryCategories
+  ])).sort((a, b) => a.localeCompare(b));
   const uniqueSubCategories = [...new Set(activeInventory.map(i => i.sub_category).filter(Boolean))];
   const uniqueFormats = [...new Set(activeInventory.map(i => i.format).filter(Boolean))];
   const uniqueLocations = [...new Set(activeInventory.map(i => i.bin_location).filter(Boolean))];

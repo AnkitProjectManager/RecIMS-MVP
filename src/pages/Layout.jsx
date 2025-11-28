@@ -5,6 +5,7 @@ import { recims } from "@/api/recimsClient";
 import TenantHeader from "@/components/TenantHeader";
 import { TenantProvider, useTenant } from "@/components/TenantContext";
 import { useQueryClient } from "@tanstack/react-query";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import {
   LayoutDashboard,
   TruckIcon,
@@ -34,7 +35,7 @@ export default function Layout({ children, currentPageName }) {
 }
 
 function LayoutShell({ children, currentPageName }) {
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+  const [sidebarOpen, setSidebarOpen] = usePersistentState('recims:sidebar-open', true);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();

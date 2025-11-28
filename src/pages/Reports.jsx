@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { recims } from "@/api/recimsClient";
 import { useQuery } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
@@ -29,14 +29,15 @@ import TenantHeader from "@/components/TenantHeader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { usePersistentState } from "@/hooks/usePersistentState";
 
 export default function Reports() {
   const navigate = useNavigate();
   const { user } = useTenant();
-  const [dateFilter, setDateFilter] = useState('ytd');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [dateFilter, setDateFilter] = usePersistentState('reports:date-filter', 'ytd');
+  const [customStartDate, setCustomStartDate] = usePersistentState('reports:custom-start', '');
+  const [customEndDate, setCustomEndDate] = usePersistentState('reports:custom-end', '');
+  const [selectedCategory, setSelectedCategory] = usePersistentState('reports:selected-category', null);
 
   const { data: reportHistory = [], isLoading } = useQuery({
     queryKey: ['reportHistory', user?.tenant_id],
@@ -153,6 +154,14 @@ export default function Reports() {
     name: category,
     value: total
   })).sort((a, b) => b.value - a.value);
+
+  React.useEffect(() => {
+    if (!selectedCategory) return;
+    const exists = categoryData.some((category) => category.name === selectedCategory);
+    if (!exists) {
+      setSelectedCategory(null);
+    }
+  }, [selectedCategory, categoryData, setSelectedCategory]);
 
   // Calculate sales by sub-category for selected category
   const salesBySubCategory = selectedCategory 

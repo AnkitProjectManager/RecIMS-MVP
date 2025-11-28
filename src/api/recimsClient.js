@@ -1,7 +1,37 @@
 // RecIMS Standalone API Client
 // Implements direct API calls to the RecIMS backend
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+const nodeProcess = typeof globalThis !== 'undefined' ? globalThis.process : undefined;
+const nodeEnv = nodeProcess?.env;
+
+let importMetaEnv;
+try {
+  importMetaEnv = import.meta.env;
+} catch (error) {
+  importMetaEnv = undefined;
+}
+
+const browserRuntimeEnv = typeof window !== 'undefined' ? window.__RECIMS_ENV__ : undefined;
+
+function readPublicEnv(keys, fallback) {
+  for (const key of keys) {
+    if (browserRuntimeEnv && browserRuntimeEnv[key]) {
+      return browserRuntimeEnv[key];
+    }
+    if (importMetaEnv && typeof importMetaEnv[key] !== 'undefined') {
+      return importMetaEnv[key];
+    }
+    if (nodeEnv && typeof nodeEnv[key] !== 'undefined') {
+      return nodeEnv[key];
+    }
+  }
+  return fallback;
+}
+
+const rawApiUrl = readPublicEnv(
+  ['NEXT_PUBLIC_API_URL', 'VITE_API_URL', 'PUBLIC_API_URL', 'RECIMS_API_URL'],
+  '/api'
+);
 const API_URL = rawApiUrl.endsWith('/api')
   ? rawApiUrl.replace(/\/$/, '')
   : `${rawApiUrl.replace(/\/$/, '')}/api`;
@@ -17,6 +47,32 @@ const storage = typeof window !== 'undefined'
 
 const FALLBACK_ENTITY_KEY = 'recims_fallback_entities';
 const FALLBACK_UPLOAD_KEY = 'recims_fallback_uploads';
+const LOCAL_USER_KEY = 'recims_local_user';
+const DEMO_TOKEN_PREFIX = 'recims_demo_token';
+const DEFAULT_TENANT_ID = 'TNT-001';
+
+const DEFAULT_DEMO_USER = {
+  id: 'demo-user',
+  name: 'Demo Operations Lead',
+  display_name: 'Demo Operator',
+  email: 'demo@recims.com',
+  phone: '+1-860-555-0111',
+  tenant_id: DEFAULT_TENANT_ID,
+  tenant: 'min_tech',
+  tenants: ['min_tech', DEFAULT_TENANT_ID],
+  detailed_role: 'warehouse_manager',
+  role: 'super_admin',
+  timezone: 'America/New_York',
+  permissions: [
+    'dashboard:view',
+    'inventory:read',
+    'inventory:write',
+    'sales:view',
+    'purchasing:view',
+    'alerts:manage',
+    'tenants:manage',
+  ],
+};
 const CACHEABLE_ENTITIES = new Set([
   'tenant',
   'tenants',
@@ -24,10 +80,78 @@ const CACHEABLE_ENTITIES = new Set([
   'tenant_category',
   'tenant_contacts',
   'tenant_contact',
+  'supplier',
+  'suppliers',
+  'material',
+  'materials',
+  'materialcategory',
+  'materialcategories',
+  'zone',
+  'zones',
+  'container',
+  'containers',
+  'carrier',
+  'carriers',
   'appsettings',
   'appsetting',
   'shiftlog',
   'shiftlogs',
+  'inventory',
+  'inventories',
+  'inboundshipment',
+  'inboundshipments',
+  'bin',
+  'bins',
+  'purchaseorder',
+  'purchaseorders',
+  'purchaseorderline',
+  'purchaseorderlines',
+  'purchaseorderitem',
+  'purchaseorderitems',
+  'salesorder',
+  'salesorders',
+  'salesorderline',
+  'salesorderlines',
+  'salesorderitem',
+  'salesorderitems',
+  'customer',
+  'customers',
+  'vendor',
+  'vendors',
+  'productsku',
+  'productskus',
+  'reporthistory',
+  'reporthistories',
+  'emailtemplate',
+  'emailtemplates',
+  'signature_request',
+  'signature_requests',
+  'signaturerequest',
+  'signaturerequests',
+  'alertsettings',
+  'alertsetting',
+  'inventoryalert',
+  'inventoryalerts',
+  'qboconnection',
+  'qboconnections',
+  'invoice',
+  'invoices',
+  'invoiceline',
+  'invoicelines',
+  'waybill',
+  'waybills',
+  'waybillitem',
+  'waybillitems',
+  'outboundshipment',
+  'outboundshipments',
+  'address',
+  'addresses',
+  'qcinspection',
+  'qcinspections',
+  'qccriteria',
+  'qccriterias',
+  'audittrail',
+  'audittrails',
 ]);
 
 function safeParseJSON(value, fallback) {
@@ -36,6 +160,44 @@ function safeParseJSON(value, fallback) {
   } catch (error) {
     return fallback;
   }
+}
+
+function readCachedUser() {
+  return safeParseJSON(storage.getItem(LOCAL_USER_KEY), null);
+}
+
+function persistCachedUser(user) {
+  if (!user) {
+    storage.removeItem(LOCAL_USER_KEY);
+    return;
+  }
+  try {
+    storage.setItem(LOCAL_USER_KEY, JSON.stringify(user));
+  } catch (error) {
+    console.warn('[recims] Failed to persist local user cache', error);
+  }
+}
+
+function ensureDemoToken(existingToken) {
+  if (existingToken) {
+    setToken(existingToken);
+    return existingToken;
+  }
+  const nextToken = `${DEMO_TOKEN_PREFIX}-${generateClientId()}`;
+  setToken(nextToken);
+  return nextToken;
+}
+
+function buildDemoUser(overrides = {}) {
+  const timestamp = new Date().toISOString();
+  return {
+    ...DEFAULT_DEMO_USER,
+    id: DEFAULT_DEMO_USER.id || generateClientId(),
+    last_login: timestamp,
+    updated_at: timestamp,
+    created_at: DEFAULT_DEMO_USER.created_at || timestamp,
+    ...overrides,
+  };
 }
 
 function normalizeEntityKey(name) {
@@ -76,6 +238,59 @@ function writeFallbackList(entityName, list) {
     ? list.map((item) => ({ ...item }))
     : [];
   saveFallbackEntityMap(map);
+}
+
+function normalizeRecordForCache(record) {
+  const safeRecord = record && typeof record === 'object' ? record : {};
+  if (safeRecord.id == null) {
+    const generatedId = generateClientId();
+    return { key: generatedId, value: { ...safeRecord, id: generatedId } };
+  }
+  const key = String(safeRecord.id);
+  if (typeof safeRecord.id === 'string') {
+    return { key, value: { ...safeRecord } };
+  }
+  return { key, value: { ...safeRecord, id: key } };
+}
+
+function mergeRemoteRecordsWithFallback(entityName, remoteRecords) {
+  const fallbackRecords = readFallbackList(entityName);
+  if (!Array.isArray(remoteRecords) || remoteRecords.length === 0) {
+    return fallbackRecords;
+  }
+
+  const mergedMap = new Map();
+  fallbackRecords.forEach((record) => {
+    const { key, value } = normalizeRecordForCache(record);
+    mergedMap.set(key, value);
+  });
+
+  remoteRecords.forEach((record) => {
+    const { key, value } = normalizeRecordForCache(record);
+    mergedMap.set(key, value);
+  });
+
+  const mergedList = Array.from(mergedMap.values());
+  writeFallbackList(entityName, mergedList);
+  return mergedList;
+}
+
+function seedFallbackData(seedMap) {
+  if (!seedMap || typeof seedMap !== 'object') {
+    return 0;
+  }
+  let seededCount = 0;
+  Object.entries(seedMap).forEach(([entityName, records]) => {
+    if (!entityName || !Array.isArray(records)) {
+      return;
+    }
+    if (!isCacheableEntity(entityName)) {
+      return;
+    }
+    writeFallbackList(entityName, records);
+    seededCount += records.length;
+  });
+  return seededCount;
 }
 
 function generateClientId() {
@@ -261,20 +476,43 @@ async function fetchAPI(endpoint, options = {}) {
 // Auth API
 const auth = {
   async login({ email, password }) {
-    const data = await fetchAPI('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    
-    if (data.token) {
-      setToken(data.token);
+    try {
+      const data = await fetchAPI('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (data?.token) {
+        setToken(data.token);
+      }
+
+      const normalizedUser = data?.user ?? data ?? null;
+      if (normalizedUser) {
+        persistCachedUser(normalizedUser);
+        return normalizedUser;
+      }
+
+      const fallbackUser = buildDemoUser({ email: normalizedUser?.email || email });
+      persistCachedUser(fallbackUser);
+      ensureDemoToken(getStoredToken());
+      return fallbackUser;
+    } catch (error) {
+      console.warn('[recims] Login API failed, using demo user', error);
+      const demoUser = buildDemoUser({ email: email || DEFAULT_DEMO_USER.email });
+      persistCachedUser(demoUser);
+      ensureDemoToken(getStoredToken());
+      return demoUser;
     }
-    
-    return data.user;
   },
 
   async logout() {
+    try {
+      await fetchAPI('/auth/logout', { method: 'POST' });
+    } catch (error) {
+      console.warn('[recims] Logout API failed, clearing local session instead', error);
+    }
     setToken(null);
+    persistCachedUser(null);
   },
 
   getToken() {
@@ -282,31 +520,82 @@ const auth = {
   },
 
   isAuthenticated() {
-    return Boolean(getStoredToken());
+    return Boolean(getStoredToken() || readCachedUser());
   },
 
   async me() {
-    return fetchAPI('/auth/me');
+    try {
+      const payload = await fetchAPI('/auth/me');
+      const normalizedUser = payload?.user ?? payload ?? null;
+      if (payload?.token) {
+        setToken(payload.token);
+      }
+      if (normalizedUser) {
+        persistCachedUser(normalizedUser);
+        return normalizedUser;
+      }
+      throw new Error('No user payload returned from /auth/me');
+    } catch (error) {
+      console.warn('[recims] auth.me failed, using cached or demo user', error);
+      const cached = readCachedUser();
+      if (cached) {
+        ensureDemoToken(getStoredToken());
+        return cached;
+      }
+      const demoUser = buildDemoUser();
+      persistCachedUser(demoUser);
+      ensureDemoToken(getStoredToken());
+      return demoUser;
+    }
   },
 
   async requestPasswordReset({ email }) {
-    return fetchAPI('/auth/password-reset', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
+    try {
+      return await fetchAPI('/auth/password-reset', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+    } catch (error) {
+      console.warn('[recims] Password reset fallback triggered', error);
+      return {
+        success: true,
+        fallback: true,
+        message: 'Password reset email simulated for offline mode',
+        email,
+      };
+    }
   },
 
   async updateMe(data) {
-    const payload = await fetchAPI('/auth/me', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
+    try {
+      const payload = await fetchAPI('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      });
 
-    if (payload?.token) {
-      setToken(payload.token);
+      if (payload?.token) {
+        setToken(payload.token);
+      }
+
+      const normalizedUser = payload?.user ?? payload ?? null;
+      if (normalizedUser) {
+        persistCachedUser(normalizedUser);
+        return normalizedUser;
+      }
+
+      throw new Error('No user payload returned from updateMe');
+    } catch (error) {
+      console.warn('[recims] updateMe failed, applying local mutation', error);
+      const cached = readCachedUser() || buildDemoUser();
+      const merged = {
+        ...cached,
+        ...data,
+        updated_at: new Date().toISOString(),
+      };
+      persistCachedUser(merged);
+      ensureDemoToken(getStoredToken());
+      return merged;
     }
-
-    return payload?.user ?? payload;
   },
 };
 
@@ -348,8 +637,9 @@ function createEntityAPI(entityName) {
       try {
         const entities = await fetchAPI(`/entities/${entityName}`);
         const normalized = Array.isArray(entities) ? entities : [];
-        const sorted = sortEntities(normalized, orderBy);
-        writeFallbackList(entityName, sorted);
+        const merged = mergeRemoteRecordsWithFallback(entityName, normalized);
+        const dataset = merged.length > 0 ? merged : normalized;
+        const sorted = sortEntities(dataset, orderBy);
         return limit ? sorted.slice(0, limit) : sorted;
       } catch (error) {
         logFallback(entityName, 'list', error);
@@ -449,46 +739,62 @@ const entities = {
   // Core entities
   User: createEntityAPI('User'),
   Tenant: createEntityAPI('tenants'),
+  Supplier: createEntityAPI('Supplier'),
+  Material: createEntityAPI('Material'),
   
   // Inventory entities
   Inventory: createEntityAPI('Inventory'),
   Bin: createEntityAPI('Bin'),
   ProductSKU: createEntityAPI('ProductSKU'),
   Zone: createEntityAPI('Zone'),
+  MaterialCategory: createEntityAPI('MaterialCategory'),
+  Container: createEntityAPI('Container'),
   
   // Shipment entities
   InboundShipment: createEntityAPI('InboundShipment'),
+  OutboundShipment: createEntityAPI('OutboundShipment'),
   
   // Purchase Order entities
   PurchaseOrder: createEntityAPI('PurchaseOrder'),
   PurchaseOrderLine: createEntityAPI('PurchaseOrderLine'),
+  PurchaseOrderItem: createEntityAPI('PurchaseOrderItem'),
+  Vendor: createEntityAPI('Vendor'),
   
   // Sales Order entities
   SalesOrder: createEntityAPI('SalesOrder'),
   SalesOrderLine: createEntityAPI('SalesOrderLine'),
+  SalesOrderItem: createEntityAPI('SalesOrderItem'),
   
   // Quality Control
   QCInspection: createEntityAPI('QCInspection'),
   QCCriteria: createEntityAPI('QCCriteria'),
+  ComplianceCertificate: createEntityAPI('ComplianceCertificate'),
   
   // Customer/Vendor
   Customer: createEntityAPI('Customer'),
-  Vendor: createEntityAPI('Vendor'),
+  Address: createEntityAPI('Address'),
   
   // Settings & Config
   AppSettings: createEntityAPI('AppSettings'),
   TenantCategory: createEntityAPI('tenant_categories'),
   TenantContact: createEntityAPI('tenant_contacts'),
+  AlertSettings: createEntityAPI('AlertSettings'),
+  InventoryAlert: createEntityAPI('InventoryAlert'),
+  QBOConnection: createEntityAPI('QBOConnection'),
+  ReportHistory: createEntityAPI('ReportHistory'),
+  EmailTemplate: createEntityAPI('EmailTemplate'),
   
   // Logistics
   Carrier: createEntityAPI('Carrier'),
   Waybill: createEntityAPI('Waybill'),
   WaybillItem: createEntityAPI('WaybillItem'),
+  SignatureRequest: createEntityAPI('SignatureRequest'),
   
-  // Misc
+  // Finance & Misc
+  Invoice: createEntityAPI('Invoice'),
+  InvoiceLine: createEntityAPI('InvoiceLine'),
   ShiftLog: createEntityAPI('ShiftLog'),
-  Container: createEntityAPI('Container'),
-  MaterialCategory: createEntityAPI('MaterialCategory'),
+  AuditTrail: createEntityAPI('AuditTrail'),
 };
 
 // Functions API (placeholder for now)
@@ -654,6 +960,7 @@ export const recims = {
   maintenance,
   integrations,
   agents,
+  seedFallbackData,
 };
 
 

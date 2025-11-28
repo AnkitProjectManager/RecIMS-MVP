@@ -12,6 +12,95 @@ const DEFAULT_TENANT_CONFIG = {
   branding_secondary_color: '#005247',
 };
 
+const HEX_COLOR_REGEX = /^#?([0-9a-f]{6})$/i;
+const HERO_TEXT_LIGHT = '#FFFFFF';
+const HERO_TEXT_DARK = '#0F172A';
+
+const normalizeHexColor = (value, fallback) => {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const match = HEX_COLOR_REGEX.exec(value.trim());
+  if (!match) {
+    return fallback;
+  }
+  return `#${match[1].toUpperCase()}`;
+};
+
+const hexToHslString = (hex) => {
+  if (!HEX_COLOR_REGEX.test(hex)) return null;
+  const normalized = hex.replace('#', '');
+  const r = parseInt(normalized.slice(0, 2), 16) / 255;
+  const g = parseInt(normalized.slice(2, 4), 16) / 255;
+  const b = parseInt(normalized.slice(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h;
+  const l = (max + min) / 2;
+
+  if (max === min) {
+    h = 0;
+  } else {
+    const d = max - min;
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+        break;
+    }
+    h /= 6;
+  }
+
+  const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
+  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+};
+
+const hexToRgba = (hex, alpha = 1) => {
+  if (!HEX_COLOR_REGEX.test(hex)) return `rgba(0,0,0,${alpha})`;
+  const normalized = hex.replace('#', '');
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const hexToRgb = (hex) => {
+  if (!HEX_COLOR_REGEX.test(hex)) return null;
+  const normalized = hex.replace('#', '');
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+};
+
+const srgbToLinear = (value) => {
+  const ratio = value / 255;
+  return ratio <= 0.03928 ? ratio / 12.92 : Math.pow((ratio + 0.055) / 1.055, 2.4);
+};
+
+const getRelativeLuminance = (hex) => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const r = srgbToLinear(rgb.r);
+  const g = srgbToLinear(rgb.g);
+  const b = srgbToLinear(rgb.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+const deriveHeroTextColor = (primaryColor, secondaryColor) => {
+  const primaryLum = getRelativeLuminance(primaryColor);
+  const secondaryLum = getRelativeLuminance(secondaryColor);
+  const averageLum = (primaryLum + secondaryLum) / 2;
+  return averageLum > 0.6 ? HERO_TEXT_DARK : HERO_TEXT_LIGHT;
+};
+
 const STORAGE_KEYS = {
   appSettings: 'recims:appSettings',
   tenantConfigs: 'recims:tenantConfigs',
@@ -238,12 +327,37 @@ export function TenantProvider({ children }) {
 
   const tenantConfig = useMemo(() => {
     const baseTenant = tenant ?? DEFAULT_TENANT_CONFIG;
+    const primaryColor = normalizeHexColor(
+      baseTenant.branding_primary_color,
+      DEFAULT_TENANT_CONFIG.branding_primary_color
+    );
+    const secondaryColor = normalizeHexColor(
+      baseTenant.branding_secondary_color,
+      DEFAULT_TENANT_CONFIG.branding_secondary_color
+    );
+
     return {
       ...DEFAULT_TENANT_CONFIG,
       ...baseTenant,
+      branding_primary_color: primaryColor,
+      branding_secondary_color: secondaryColor,
       features: mergedFeatures,
     };
   }, [tenant, mergedFeatures]);
+
+  const theme = useMemo(() => {
+    const primaryColor = tenantConfig.branding_primary_color || DEFAULT_TENANT_CONFIG.branding_primary_color;
+    const secondaryColor = tenantConfig.branding_secondary_color || DEFAULT_TENANT_CONFIG.branding_secondary_color;
+    return {
+      primaryColor,
+      secondaryColor,
+      primaryHsl: hexToHslString(primaryColor),
+      secondaryHsl: hexToHslString(secondaryColor),
+      gradient: `linear-gradient(120deg, ${primaryColor}, ${secondaryColor})`,
+      glow: hexToRgba(primaryColor, 0.35),
+      heroTextColor: deriveHeroTextColor(primaryColor, secondaryColor),
+    };
+  }, [tenantConfig.branding_primary_color, tenantConfig.branding_secondary_color]);
 
   const loading = userLoading || (tenantKey ? tenantLoading : false) || settingsLoading;
   const error = userError?.message || tenantError?.message || settingsError?.message || null;
@@ -263,8 +377,29 @@ export function TenantProvider({ children }) {
       error,
       refreshTenant,
       featureFlags,
+      theme,
     };
-  }, [tenantConfig, tenantKey, queryClient, user, loading, error, featureFlags]);
+  }, [tenantConfig, tenantKey, queryClient, user, loading, error, featureFlags, theme]);
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    root.style.setProperty('--tenant-primary-color', theme.primaryColor);
+    root.style.setProperty('--tenant-secondary-color', theme.secondaryColor);
+    if (theme.primaryHsl) {
+      root.style.setProperty('--tenant-primary-hsl', theme.primaryHsl);
+    }
+    if (theme.secondaryHsl) {
+      root.style.setProperty('--tenant-secondary-hsl', theme.secondaryHsl);
+    }
+    root.style.setProperty('--tenant-primary-glow', theme.glow);
+    if (theme.gradient) {
+      root.style.setProperty('--tenant-gradient', theme.gradient);
+    }
+    if (theme.heroTextColor) {
+      root.style.setProperty('--tenant-hero-text-color', theme.heroTextColor);
+    }
+  }, [theme]);
 
   return (
     <TenantContext.Provider value={contextValue}>
