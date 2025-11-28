@@ -24,7 +24,7 @@ import {
   Trash2
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { format } from "date-fns";
+import { safeFormatDate } from "@/lib/utils";
 
 export default function TenantConsole() {
   const navigate = useNavigate();
@@ -349,7 +349,7 @@ export default function TenantConsole() {
                         </Badge>
                       </td>
                       <td className="py-4 px-4 text-gray-600 text-sm">
-                        {tenant.created_date ? format(new Date(tenant.created_date), 'MMM dd, yyyy') : '-'}
+                        {safeFormatDate(tenant.created_date)}
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex items-center justify-center gap-2">

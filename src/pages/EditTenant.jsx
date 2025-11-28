@@ -22,6 +22,144 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { LOGO_ALLOWED_TYPES, LOGO_MAX_BYTES, uploadTenantLogo } from "@/lib/uploads";
 
+const getDefaultFeatures = () => ({
+  po_module_enabled: false,
+  bin_capacity_enabled: false,
+  photo_upload_enabled: false,
+  ai_classification_enabled: false,
+  qc_module_enabled: true,
+  multi_zone_enabled: false,
+});
+
+const getDefaultApiKeys = () => ({
+  quickbooks_client_id: "",
+  quickbooks_client_secret: "",
+  taxjar_api_key: "",
+  hellosign_client_id: "",
+  hellosign_api_key: "",
+  stripe_api_key: "",
+  stripe_webhook_secret: "",
+});
+
+const getDefaultNumberFormat = () => ({ decimal: ".", thousand: "," });
+const getDefaultLoadTypes = () => ["plastic", "metal", "mixed"];
+
+const createEmptyFormState = () => ({
+  name: "",
+  code: "",
+  base_subdomain: "",
+  status: "ACTIVE",
+  display_name: "",
+  business_type: "general_manufacturing",
+  primary_contact_name: "",
+  primary_contact_email: "",
+  primary_contact_phone: "",
+  default_currency: "USD",
+  country_code: "US",
+  region: "USA",
+  phone_number_format: "+1 (XXX) XXX-XXXX",
+  unit_system: "METRIC",
+  timezone: "America/New_York",
+  date_format: "YYYY-MM-DD",
+  number_format: getDefaultNumberFormat(),
+  branding_primary_color: "#007A6E",
+  branding_secondary_color: "#005247",
+  branding_logo_url: "",
+  address_line1: "",
+  address_line2: "",
+  city: "",
+  state_province: "",
+  postal_code: "",
+  address_country_code: "US",
+  website: "",
+  description: "",
+  default_load_types: getDefaultLoadTypes(),
+  features: getDefaultFeatures(),
+  api_keys: getDefaultApiKeys(),
+});
+
+const buildFormStateFromTenant = (tenant) => {
+  const base = createEmptyFormState();
+  if (!tenant) {
+    return base;
+  }
+
+  return {
+    ...base,
+    name: tenant.name || tenant.display_name || base.name,
+    code: tenant.code || tenant.tenant_code || base.code,
+    base_subdomain: tenant.base_subdomain || tenant.tenant_code || base.base_subdomain,
+    status: tenant.status || (tenant.is_active === false ? "SUSPENDED" : base.status),
+    display_name: tenant.display_name || tenant.name || base.display_name,
+    business_type: tenant.business_type || base.business_type,
+    primary_contact_name: tenant.primary_contact_name || base.primary_contact_name,
+    primary_contact_email: tenant.primary_contact_email || base.primary_contact_email,
+    primary_contact_phone: tenant.primary_contact_phone || base.primary_contact_phone,
+    default_currency: tenant.default_currency || base.default_currency,
+    country_code: tenant.country_code || base.country_code,
+    region: tenant.region || base.region,
+    phone_number_format: tenant.phone_number_format || base.phone_number_format,
+    unit_system: tenant.unit_system || base.unit_system,
+    timezone: tenant.timezone || base.timezone,
+    date_format: tenant.date_format || base.date_format,
+    number_format: {
+      ...base.number_format,
+      ...(typeof tenant.number_format === "object" && tenant.number_format !== null ? tenant.number_format : {}),
+    },
+    branding_primary_color: tenant.branding_primary_color || base.branding_primary_color,
+    branding_secondary_color: tenant.branding_secondary_color || base.branding_secondary_color,
+    branding_logo_url: tenant.branding_logo_url || base.branding_logo_url,
+    address_line1: tenant.address_line1 || base.address_line1,
+    address_line2: tenant.address_line2 || base.address_line2,
+    city: tenant.city || base.city,
+    state_province: tenant.state_province || base.state_province,
+    postal_code: tenant.postal_code || base.postal_code,
+    address_country_code: tenant.address_country_code || tenant.country_code || base.address_country_code,
+    website: tenant.website || base.website,
+    description: tenant.description || base.description,
+    default_load_types:
+      Array.isArray(tenant.default_load_types) && tenant.default_load_types.length > 0
+        ? [...tenant.default_load_types]
+        : [...base.default_load_types],
+    features: {
+      ...getDefaultFeatures(),
+      ...(tenant.features || {}),
+    },
+    api_keys: {
+      ...getDefaultApiKeys(),
+      ...(tenant.api_keys || {}),
+    },
+  };
+};
+
+const normalizeTenantName = (value) =>
+  typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "";
+
+const sanitizePayload = (payload) => {
+  const sanitizeValue = (value) => {
+    if (value == null) {
+      return value;
+    }
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (Array.isArray(value)) {
+      return value.map(sanitizeValue);
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [key, sanitizeValue(nested)])
+      );
+    }
+    return value;
+  };
+
+  return sanitizeValue(payload);
+};
+
 export default function EditTenant() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -65,59 +203,10 @@ export default function EditTenant() {
     initialData: [],
   });
 
-  const [formData, setFormData] = useState({});
+  const [formData, setFormData] = useState(() => createEmptyFormState());
 
   React.useEffect(() => {
-    if (tenant) {
-      setFormData({
-        name: tenant.name || '',
-        code: tenant.code || '',
-        base_subdomain: tenant.base_subdomain || '',
-        status: tenant.status || 'ACTIVE',
-        display_name: tenant.display_name || '',
-        business_type: tenant.business_type || 'general_manufacturing',
-        primary_contact_name: tenant.primary_contact_name || '',
-        primary_contact_email: tenant.primary_contact_email || '',
-        primary_contact_phone: tenant.primary_contact_phone || '',
-        default_currency: tenant.default_currency || 'USD',
-        country_code: tenant.country_code || 'US',
-        region: tenant.region || 'USA',
-        phone_number_format: tenant.phone_number_format || '+1 (XXX) XXX-XXXX',
-        unit_system: tenant.unit_system || 'METRIC',
-        timezone: tenant.timezone || 'America/New_York',
-        date_format: tenant.date_format || 'YYYY-MM-DD',
-        number_format: tenant.number_format || { decimal: '.', thousand: ',' },
-        branding_primary_color: tenant.branding_primary_color || '#007A6E',
-        branding_secondary_color: tenant.branding_secondary_color || '#005247',
-        branding_logo_url: tenant.branding_logo_url || '',
-        address_line1: tenant.address_line1 || '',
-        address_line2: tenant.address_line2 || '',
-        city: tenant.city || '',
-        state_province: tenant.state_province || '',
-        postal_code: tenant.postal_code || '',
-        address_country_code: tenant.address_country_code || 'US',
-        website: tenant.website || '',
-        description: tenant.description || '',
-        default_load_types: tenant.default_load_types || ['plastic', 'metal', 'mixed'],
-        features: tenant.features || {
-          po_module_enabled: false,
-          bin_capacity_enabled: false,
-          photo_upload_enabled: false,
-          ai_classification_enabled: false,
-          qc_module_enabled: true,
-          multi_zone_enabled: false
-        },
-        api_keys: tenant.api_keys || {
-          quickbooks_client_id: '',
-          quickbooks_client_secret: '',
-          taxjar_api_key: '',
-          hellosign_client_id: '',
-          hellosign_api_key: '',
-          stripe_api_key: '',
-          stripe_webhook_secret: ''
-        }
-      });
-    }
+    setFormData(buildFormStateFromTenant(tenant));
   }, [tenant]);
 
   const updateTenantMutation = useMutation({
@@ -178,12 +267,16 @@ export default function EditTenant() {
     e.preventDefault();
     setError(null);
 
-    // Check for duplicate tenant name (case-insensitive), excluding current tenant
-    const upperCaseName = formData.name.toUpperCase();
-    const numericTenantId = Number(tenantId);
-    const duplicateName = allTenants.find(t => {
-      const sameId = Number.isInteger(numericTenantId) ? t.id === numericTenantId : t.tenant_id === tenantId;
-      return !sameId && t.name.toUpperCase() === upperCaseName;
+    const upperCaseName = normalizeTenantName(formData.name);
+    if (!upperCaseName) {
+      setError("Company Name is required.");
+      return;
+    }
+
+    const duplicateName = allTenants.find((t) => {
+      const sameId = typeof resolvedTenantId === "number" ? t.id === resolvedTenantId : t.tenant_id === resolvedTenantId;
+      const candidateName = normalizeTenantName(t.name || t.display_name || t.company_name);
+      return !sameId && candidateName && candidateName === upperCaseName;
     });
     
     if (duplicateName) {
@@ -197,7 +290,7 @@ export default function EditTenant() {
       name: upperCaseName
     };
 
-  updateTenantMutation.mutate(dataToSave);
+    updateTenantMutation.mutate(sanitizePayload(dataToSave));
   };
 
   if (isLoading) {

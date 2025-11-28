@@ -21,7 +21,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { format } from "date-fns";
+import { safeFormatDate } from "@/lib/utils";
 
 export default function ViewTenant() {
   const navigate = useNavigate();
@@ -249,8 +249,8 @@ export default function ViewTenant() {
               </div>
             )}
             <div className="border-t pt-3">
-              <p className="text-xs text-gray-500">Created: {format(new Date(tenant.created_date), 'MMM dd, yyyy HH:mm')}</p>
-              <p className="text-xs text-gray-500">Updated: {format(new Date(tenant.updated_date), 'MMM dd, yyyy HH:mm')}</p>
+              <p className="text-xs text-gray-500">Created: {safeFormatDate(tenant.created_date, 'MMM dd, yyyy HH:mm')}</p>
+              <p className="text-xs text-gray-500">Updated: {safeFormatDate(tenant.updated_date, 'MMM dd, yyyy HH:mm')}</p>
             </div>
           </CardContent>
         </Card>
