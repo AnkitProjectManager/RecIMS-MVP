@@ -69,6 +69,13 @@ npm install
 npm run dev
 ```
 
+### Demo accounts
+
+- **Super Admin:** `admin@recims.com` / `admin123`
+- **Connecticut Metals (PHASE I–III only):** `admin@clnenv.com` / `phase3only!`
+
+You can override the restricted account via `CLNENV_USER_EMAIL`, `CLNENV_USER_PASSWORD`, or `CLNENV_USER_NAME` when booting the backend server.
+
 ## Building the app
 
 ```bash

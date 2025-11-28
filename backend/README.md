@@ -40,8 +40,14 @@ The server will start on `http://localhost:3001`
 
 ## Default Credentials
 
-- Email: `admin@recims.com`
-- Password: `admin123`
+- Super Admin: `admin@recims.com` / `admin123`
+- Connecticut Metals (PHASE I–III only): `admin@clnenv.com` / `phase3only!`
+
+Override the restricted account via environment variables if needed:
+
+- `CLNENV_USER_EMAIL`
+- `CLNENV_USER_PASSWORD`
+- `CLNENV_USER_NAME`
 
 **⚠️ Change these in production!**
 

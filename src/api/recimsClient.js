@@ -59,7 +59,7 @@ const DEFAULT_DEMO_USER = {
   phone: '+1-860-555-0111',
   tenant_id: DEFAULT_TENANT_ID,
   tenant: 'min_tech',
-  tenants: ['min_tech', DEFAULT_TENANT_ID],
+  tenants: ['min_tech', DEFAULT_TENANT_ID, 'TNT-002'],
   detailed_role: 'warehouse_manager',
   role: 'super_admin',
   timezone: 'America/New_York',
@@ -73,6 +73,301 @@ const DEFAULT_DEMO_USER = {
     'tenants:manage',
   ],
 };
+
+const ROMAN_PHASES = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+
+const SPECIAL_USER_OVERRIDES = {
+  'admin@clnenv.com': {
+    full_name: 'CLN Env Restricted Admin',
+    display_name: 'CT Metals Operations',
+    tenant_id: 'TNT-002',
+    tenant: 'TNT-002',
+    tenants: ['TNT-002'],
+    phone: '+1-860-555-0122',
+  role: 'ct_metals_admin',
+  detailed_role: 'ct_metals_admin',
+    timezone: 'America/New_York',
+    permissions: [
+      'dashboard:view',
+      'inbound:read',
+      'classification:read',
+      'bins:manage',
+      'zones:manage',
+      'purchasing:view',
+      'sales:view',
+    ],
+    phase_access: {
+      maxPhase: 3,
+      label: 'Approved Scope',
+    },
+    restrictions: {
+      enforceTenantId: 'TNT-002',
+      allowedTenantIds: ['TNT-002'],
+      maxPhase: 3,
+    },
+    ui_overrides: {
+      hidePhaseBranding: true,
+      hideAccessBanner: true,
+      hideInventoryValueTile: true,
+      disablePhaseRestriction: true,
+      maxAllowedPhase: 3,
+      phaseExemptFeatures: ['enable_inventory_module', 'inventory_module_enabled'],
+      accessCardTitle: 'Access level',
+      accessCardDescription: 'Limited to CT Metals approved modules.',
+      accessLevelLabel: 'CT Metals Access',
+    },
+    feature_overrides: {
+      enable_po_module: true,
+      po_module_enabled: true,
+      purchasing_module_enabled: true,
+      enable_inventory_module: true,
+      inventory_module_enabled: true,
+    },
+  },
+};
+
+function phaseNumberToLabel(phaseNumber) {
+  const index = Math.min(Math.max(Number(phaseNumber) || 1, 1), ROMAN_PHASES.length) - 1;
+  const roman = ROMAN_PHASES[index] || ROMAN_PHASES[0];
+  return `PHASE ${roman}`;
+}
+
+function parsePhaseLimit(value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const clamped = Math.min(Math.max(Math.floor(value), 1), ROMAN_PHASES.length);
+    return { maxPhase: clamped, label: phaseNumberToLabel(clamped) };
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    if (typeof value.maxPhase === 'number') {
+      return parsePhaseLimit(value.maxPhase);
+    }
+    if (value.label) {
+      return parsePhaseLimit(value.label);
+    }
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const romanMatch = normalized.match(/PHASE\s+([IVX]+)/);
+  if (romanMatch) {
+    const roman = romanMatch[1];
+    const index = ROMAN_PHASES.indexOf(roman);
+    if (index >= 0) {
+      return { maxPhase: index + 1, label: `PHASE ${roman}` };
+    }
+  }
+
+  const compactRomanMatch = normalized.match(/^([IVX]+)$/);
+  if (compactRomanMatch) {
+    const roman = compactRomanMatch[1];
+    const index = ROMAN_PHASES.indexOf(roman);
+    if (index >= 0) {
+      return { maxPhase: index + 1, label: `PHASE ${roman}` };
+    }
+  }
+
+  const digitMatch = normalized.match(/([1-6])/);
+  if (digitMatch) {
+    const numericPhase = Number(digitMatch[1]);
+    return { maxPhase: numericPhase, label: phaseNumberToLabel(numericPhase) };
+  }
+
+  return null;
+}
+
+function normalizePhaseAccess(value) {
+  const parsed = parsePhaseLimit(value);
+  return parsed ? { maxPhase: parsed.maxPhase, label: parsed.label } : null;
+}
+
+function getUserOverride(email) {
+  if (!email) return null;
+  return SPECIAL_USER_OVERRIDES[email.trim().toLowerCase()] || null;
+}
+
+function mergeRestrictions(baseRestrictions, overrideRestrictions, fallbackTenantId, phaseAccess) {
+  const next = { ...(baseRestrictions || {}) };
+
+  if (overrideRestrictions && typeof overrideRestrictions === 'object') {
+    Object.entries(overrideRestrictions).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        next[key] = [...value];
+      } else if (value && typeof value === 'object') {
+        next[key] = { ...value };
+      } else if (value !== undefined) {
+        next[key] = value;
+      }
+    });
+  }
+
+  if (!next.enforceTenantId && fallbackTenantId) {
+    next.enforceTenantId = fallbackTenantId;
+  }
+
+  if (!next.allowedTenantIds && next.enforceTenantId) {
+    next.allowedTenantIds = [next.enforceTenantId];
+  }
+
+  if (phaseAccess?.maxPhase && !next.maxPhase) {
+    next.maxPhase = phaseAccess.maxPhase;
+  }
+
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+function applyUserOverrides(user, fallbackEmail) {
+  if (!user && !fallbackEmail) {
+    return user;
+  }
+
+  const normalizedEmail = (user?.email || fallbackEmail || '').trim().toLowerCase();
+  const overrides = getUserOverride(normalizedEmail);
+
+  const mergedUser = {
+    ...user,
+    email: normalizedEmail || user?.email,
+  };
+
+  if (overrides) {
+    Object.entries(overrides).forEach(([key, value]) => {
+      if (key === 'restrictions' || key === 'phase_access') {
+        return;
+      }
+      if (Array.isArray(value)) {
+        mergedUser[key] = [...value];
+        return;
+      }
+      if (value && typeof value === 'object') {
+        mergedUser[key] = { ...value };
+        return;
+      }
+      mergedUser[key] = value;
+    });
+  }
+
+  const overridePhaseAccess = overrides?.phase_access || normalizePhaseAccess(overrides?.phase_limit);
+  const existingPhaseAccess = normalizePhaseAccess(mergedUser.phase_access || mergedUser.phase_limit);
+  const phaseAccess = overridePhaseAccess || existingPhaseAccess;
+
+  if (phaseAccess) {
+    mergedUser.phase_access = phaseAccess;
+    mergedUser.phase_limit = phaseAccess.label;
+  }
+
+  mergedUser.restrictions = mergeRestrictions(
+    mergedUser.restrictions,
+    overrides?.restrictions,
+    overrides?.tenant_id || mergedUser.tenant_id,
+    mergedUser.phase_access
+  );
+
+  return mergedUser;
+}
+
+function getCachedUserRestrictionsSnapshot() {
+  const user = readCachedUser();
+  if (!user) {
+    return null;
+  }
+
+  const restrictions = user.restrictions || null;
+  const enforceTenantId = restrictions?.enforceTenantId || restrictions?.forceTenantId || null;
+  const allowedTenantIds = restrictions?.allowedTenantIds
+    ? restrictions.allowedTenantIds.map((value) => String(value))
+    : enforceTenantId
+      ? [String(enforceTenantId)]
+      : null;
+
+  const maxPhase = typeof restrictions?.maxPhase === 'number'
+    ? restrictions.maxPhase
+    : user.phase_access?.maxPhase ?? null;
+
+  return {
+    user,
+    enforceTenantId: enforceTenantId ? String(enforceTenantId) : null,
+    allowedTenantIds,
+    maxPhase,
+  };
+}
+
+function extractTenantId(record) {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  if (record.tenant_id != null) {
+    return String(record.tenant_id);
+  }
+  if (record.tenantId != null) {
+    return String(record.tenantId);
+  }
+  if (typeof record.tenant === 'string') {
+    return record.tenant;
+  }
+  if (record.tenant && typeof record.tenant === 'object' && record.tenant.tenant_id != null) {
+    return String(record.tenant.tenant_id);
+  }
+  return null;
+}
+
+function filterRecordsByRestrictions(records) {
+  if (!Array.isArray(records)) {
+    return records;
+  }
+  const snapshot = getCachedUserRestrictionsSnapshot();
+  if (!snapshot?.allowedTenantIds?.length) {
+    return records;
+  }
+  const allowedSet = new Set(snapshot.allowedTenantIds);
+  return records.filter((record) => {
+    const tenantCandidate = extractTenantId(record);
+    if (!tenantCandidate) {
+      return true;
+    }
+    return allowedSet.has(String(tenantCandidate));
+  });
+}
+
+function ensureRecordAllowed(record) {
+  if (!record) {
+    return record;
+  }
+  const snapshot = getCachedUserRestrictionsSnapshot();
+  if (!snapshot?.allowedTenantIds?.length) {
+    return record;
+  }
+  const tenantCandidate = extractTenantId(record);
+  if (!tenantCandidate) {
+    return record;
+  }
+  if (!snapshot.allowedTenantIds.includes(String(tenantCandidate))) {
+    const error = new Error('Record not accessible for current tenant');
+    error.status = 403;
+    throw error;
+  }
+  return record;
+}
+
+function enforceTenantScope(data) {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+  const snapshot = getCachedUserRestrictionsSnapshot();
+  if (!snapshot?.enforceTenantId) {
+    return data;
+  }
+  return {
+    ...data,
+    tenant_id: snapshot.enforceTenantId,
+  };
+}
 const CACHEABLE_ENTITIES = new Set([
   'tenant',
   'tenants',
@@ -494,17 +789,18 @@ const auth = {
 
       const normalizedUser = data?.user ?? data ?? null;
       if (normalizedUser) {
-        persistCachedUser(normalizedUser);
-        return normalizedUser;
+        const finalUser = applyUserOverrides(normalizedUser, email);
+        persistCachedUser(finalUser);
+        return finalUser;
       }
 
-      const fallbackUser = buildDemoUser({ email: normalizedUser?.email || email });
+      const fallbackUser = applyUserOverrides(buildDemoUser({ email: normalizedUser?.email || email }), email);
       persistCachedUser(fallbackUser);
       ensureDemoToken(getStoredToken());
       return fallbackUser;
     } catch (error) {
       console.warn('[recims] Login API failed, using demo user', error);
-      const demoUser = buildDemoUser({ email: email || DEFAULT_DEMO_USER.email });
+      const demoUser = applyUserOverrides(buildDemoUser({ email: email || DEFAULT_DEMO_USER.email }), email);
       persistCachedUser(demoUser);
       ensureDemoToken(getStoredToken());
       return demoUser;
@@ -533,10 +829,12 @@ const auth = {
     const resolveOfflineUser = () => {
       const cached = readCachedUser();
       if (cached) {
+        const finalCached = applyUserOverrides(cached, cached.email);
+        persistCachedUser(finalCached);
         ensureDemoToken(getStoredToken());
-        return cached;
+        return finalCached;
       }
-      const demoUser = buildDemoUser();
+      const demoUser = applyUserOverrides(buildDemoUser(), DEFAULT_DEMO_USER.email);
       persistCachedUser(demoUser);
       ensureDemoToken(getStoredToken());
       return demoUser;
@@ -553,8 +851,9 @@ const auth = {
         setToken(payload.token);
       }
       if (normalizedUser) {
-        persistCachedUser(normalizedUser);
-        return normalizedUser;
+        const finalUser = applyUserOverrides(normalizedUser, normalizedUser.email);
+        persistCachedUser(finalUser);
+        return finalUser;
       }
       throw new Error('No user payload returned from /auth/me');
     } catch (error) {
@@ -606,9 +905,10 @@ const auth = {
         ...data,
         updated_at: new Date().toISOString(),
       };
-      persistCachedUser(merged);
+      const finalUser = applyUserOverrides(merged, merged.email);
+      persistCachedUser(finalUser);
       ensureDemoToken(getStoredToken());
-      return merged;
+      return finalUser;
     }
   },
 };
@@ -649,7 +949,7 @@ function createEntityAPI(entityName) {
   return {
     async list(orderBy, limit) {
       if (!hasValidAuthToken()) {
-        const fallback = sortEntities(readFallbackList(entityName), orderBy);
+        const fallback = filterRecordsByRestrictions(sortEntities(readFallbackList(entityName), orderBy));
         return limit ? fallback.slice(0, limit) : fallback;
       }
       try {
@@ -657,11 +957,11 @@ function createEntityAPI(entityName) {
         const normalized = Array.isArray(entities) ? entities : [];
         const merged = mergeRemoteRecordsWithFallback(entityName, normalized);
         const dataset = merged.length > 0 ? merged : normalized;
-        const sorted = sortEntities(dataset, orderBy);
+        const sorted = filterRecordsByRestrictions(sortEntities(dataset, orderBy));
         return limit ? sorted.slice(0, limit) : sorted;
       } catch (error) {
         logFallback(entityName, 'list', error);
-        const fallback = sortEntities(readFallbackList(entityName), orderBy);
+        const fallback = filterRecordsByRestrictions(sortEntities(readFallbackList(entityName), orderBy));
         return limit ? fallback.slice(0, limit) : fallback;
       }
     },
@@ -688,7 +988,7 @@ function createEntityAPI(entityName) {
       if (!hasValidAuthToken()) {
         const fallback = readFallbackList(entityName).find((item) => String(item.id) === String(id));
         if (fallback) {
-          return { ...fallback };
+          return ensureRecordAllowed({ ...fallback });
         }
         const offlineError = new Error('Offline mode: record not available locally');
         offlineError.status = 404;
@@ -699,55 +999,57 @@ function createEntityAPI(entityName) {
         if (entity && typeof entity === 'object' && !Array.isArray(entity)) {
           upsertFallbackRecord(entityName, entity);
         }
-        return entity;
+        return ensureRecordAllowed(entity);
       } catch (error) {
         logFallback(entityName, `get(${id})`, error);
         const fallback = readFallbackList(entityName).find((item) => String(item.id) === String(id));
         if (fallback) {
-          return { ...fallback };
+          return ensureRecordAllowed({ ...fallback });
         }
         throw error;
       }
     },
 
     async create(data) {
+      const scopedData = enforceTenantScope(data);
       if (!hasValidAuthToken()) {
-        return upsertFallbackRecord(entityName, { ...data });
+        return upsertFallbackRecord(entityName, { ...scopedData });
       }
       try {
         const created = await fetchAPI(`/entities/${entityName}`, {
           method: 'POST',
-          body: JSON.stringify(data),
+          body: JSON.stringify(scopedData),
         });
         if (created && typeof created === 'object') {
           upsertFallbackRecord(entityName, created);
           return created;
         }
-        const fallbackRecord = upsertFallbackRecord(entityName, { ...data });
+        const fallbackRecord = upsertFallbackRecord(entityName, { ...scopedData });
         return fallbackRecord;
       } catch (error) {
         logFallback(entityName, 'create', error);
-        return upsertFallbackRecord(entityName, { ...data });
+        return upsertFallbackRecord(entityName, { ...scopedData });
       }
     },
 
     async update(id, data) {
+      const scopedData = enforceTenantScope(data);
       if (!hasValidAuthToken()) {
-        return upsertFallbackRecord(entityName, { ...data, id });
+        return upsertFallbackRecord(entityName, { ...scopedData, id });
       }
       try {
         const payload = await fetchAPI(`/entities/${entityName}/${id}`, {
           method: 'PUT',
-          body: JSON.stringify(data),
+          body: JSON.stringify(scopedData),
         });
         const normalized = payload && typeof payload === 'object' && !Array.isArray(payload)
           ? payload
-          : { ...data, id };
+          : { ...scopedData, id };
         upsertFallbackRecord(entityName, normalized);
         return normalized;
       } catch (error) {
         logFallback(entityName, `update(${id})`, error);
-        return upsertFallbackRecord(entityName, { ...data, id });
+        return upsertFallbackRecord(entityName, { ...scopedData, id });
       }
     },
 

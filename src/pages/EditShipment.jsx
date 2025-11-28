@@ -106,8 +106,15 @@ export default function EditShipment() {
   });
 
   const { data: containers = [] } = useQuery({
-    queryKey: ['containers'],
-    queryFn: () => recims.entities.Container.filter({ status: 'active' }),
+    queryKey: ['containers', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.Container.filter({
+        status: 'active',
+        tenant_id: user.tenant_id
+      });
+    },
+    enabled: !!user?.tenant_id,
     initialData: [],
   });
 

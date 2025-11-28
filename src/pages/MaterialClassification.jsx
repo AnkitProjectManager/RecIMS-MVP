@@ -511,14 +511,32 @@ export default function MaterialClassification() {
   // Get material categories from tenant categories based on shipment load_type
   const availableCategories = React.useMemo(() => {
     if (!selectedShipment || tenantCategories.length === 0) return [];
-    
-    // Find the tenant category that matches the shipment's load_type
-    const matchingCategory = tenantCategories.find(tc => 
-      tc.load_type_mapping === selectedShipment.load_type
-    );
-    
-    // Return sub-categories as the material options
-    return matchingCategory?.sub_categories || [];
+
+    const shipmentLoadType = (selectedShipment.load_type || '').toLowerCase();
+    const collectCategories = (categories) => {
+      const bag = new Set();
+      categories.forEach((tc) => {
+        if (Array.isArray(tc.sub_categories) && tc.sub_categories.length > 0) {
+          tc.sub_categories.forEach((sub) => bag.add(sub));
+        } else if (tc.category_name) {
+          bag.add(tc.category_name);
+        }
+      });
+      return Array.from(bag);
+    };
+
+    const matchingCategories = tenantCategories.filter((tc) => {
+      if (!shipmentLoadType || shipmentLoadType === 'mixed') {
+        return true;
+      }
+      return (tc.load_type_mapping || '').toLowerCase() === shipmentLoadType;
+    });
+
+    if (matchingCategories.length > 0) {
+      return collectCategories(matchingCategories);
+    }
+
+    return collectCategories(tenantCategories);
   }, [tenantCategories, selectedShipment]);
 
   return (

@@ -60,8 +60,18 @@ export default function ManageContainers() {
   });
 
   const { data: containers = [], isLoading } = useQuery({
-    queryKey: ['containers'],
-    queryFn: () => recims.entities.Container.list('-created_date'),
+    queryKey: ['containers', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.Container.filter(
+        {
+          tenant_id: user.tenant_id,
+          status: 'active'
+        },
+        '-created_date'
+      );
+    },
+    enabled: !!user?.tenant_id,
     initialData: [],
   });
 

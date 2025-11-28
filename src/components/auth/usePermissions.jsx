@@ -20,7 +20,7 @@ export function usePermissions(user) {
       };
     }
 
-    const role = user.detailed_role || user.role || 'warehouse_staff';
+  const role = user.detailed_role || user.role || 'warehouse_staff';
 
     // SUPERADMIN: Full system access + tenant/phase configuration
     if (role === 'superadmin') {
@@ -34,6 +34,20 @@ export function usePermissions(user) {
         canManageTenants: true,
         canConfigurePhases: true,
         role: 'superadmin'
+      };
+    }
+
+    if (role === 'ct_metals_admin' || role === 'phase3_admin') {
+      return {
+        canManageUsers: false,
+        canViewFinancials: true,
+        canApproveOrders: true,
+        canExportData: true,
+        canManageSettings: false,
+        canDeleteShipments: false,
+        canManageTenants: false,
+        canConfigurePhases: false,
+        role: 'ct_metals_admin'
       };
     }
 
@@ -134,6 +148,8 @@ export function getRoleDisplayName(role) {
   const roleNames = {
     superadmin: 'Super Administrator',
     admin: 'Administrator',
+    phase3_admin: 'CT Metals Admin',
+    ct_metals_admin: 'CT Metals Admin',
     manager: 'Manager',
     warehouse_staff: 'Warehouse Staff',
     sales_representative: 'Sales Representative',
@@ -149,6 +165,8 @@ export function getRoleColor(role) {
   const roleColors = {
     superadmin: 'bg-red-100 text-red-700 border-red-300',
     admin: 'bg-purple-100 text-purple-700 border-purple-300',
+    phase3_admin: 'bg-amber-100 text-amber-700 border-amber-300',
+    ct_metals_admin: 'bg-amber-100 text-amber-700 border-amber-300',
     manager: 'bg-blue-100 text-blue-700 border-blue-300',
     warehouse_staff: 'bg-green-100 text-green-700 border-green-300',
     sales_representative: 'bg-orange-100 text-orange-700 border-orange-300',

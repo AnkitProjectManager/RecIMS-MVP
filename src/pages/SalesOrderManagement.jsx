@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTenant } from "@/components/TenantContext";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import { formatUSD } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,6 @@ import {
   TrendingUp,
   TrendingDown,
   MoreVertical,
-  Brain
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import TenantHeader from "@/components/TenantHeader";
@@ -277,29 +277,6 @@ export default function SalesOrderManagement() {
         </div>
       </div>
 
-      {/* AI Insights Tile */}
-      <Card className="mb-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-lg bg-purple-600">
-                <Brain className="w-8 h-8 text-white" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-purple-900">Sales Activity AI Insights</h3>
-                <p className="text-sm text-purple-700">Track inactive customers and sales patterns</p>
-              </div>
-            </div>
-            <Link to={createPageUrl("AIInsightsModule")}>
-              <Button className="bg-purple-600 hover:bg-purple-700 gap-2">
-                <Brain className="w-4 h-4" />
-                View Insights
-              </Button>
-            </Link>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {/* Total Sales This Month */}
@@ -311,7 +288,7 @@ export default function SalesOrderManagement() {
               </div>
             </div>
             <p className="text-3xl font-bold text-gray-900 mb-1">
-              ${metrics.totalSalesThisMonth.toLocaleString()}
+              {formatUSD(metrics.totalSalesThisMonth, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </p>
             <p className="text-sm text-gray-600">Total Sales</p>
             <p className="text-xs text-gray-500 mt-1">This month</p>
@@ -371,7 +348,7 @@ export default function SalesOrderManagement() {
               )}
             </div>
             <p className="text-3xl font-bold text-gray-900 mb-1">
-              ${metrics.avgOrderValueThisMonth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatUSD(metrics.avgOrderValueThisMonth, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className="text-sm text-gray-600">Avg Order Value</p>
             <p className="text-xs text-gray-500 mt-1">

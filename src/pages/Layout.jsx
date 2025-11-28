@@ -1,9 +1,11 @@
 import React from "react";
+import PropTypes from "prop-types";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { recims } from "@/api/recimsClient";
 import TenantHeader from "@/components/TenantHeader";
 import { TenantProvider, useTenant } from "@/components/TenantContext";
+import { getPagePhaseRequirement } from "@/lib/phaseAccess";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import {
@@ -26,6 +28,16 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+const PHASE_LABELS = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+
+const formatPhaseLabel = (phase) => {
+  if (!Number.isFinite(phase)) {
+    return null;
+  }
+  const clamped = Math.min(Math.max(Math.floor(phase), 1), PHASE_LABELS.length);
+  return `PHASE ${PHASE_LABELS[clamped - 1]}`;
+};
+
 export default function Layout({ children, currentPageName }) {
   return (
     <TenantProvider>
@@ -34,12 +46,52 @@ export default function Layout({ children, currentPageName }) {
   );
 }
 
+Layout.propTypes = {
+  children: PropTypes.node,
+  currentPageName: PropTypes.string,
+};
+
 function LayoutShell({ children, currentPageName }) {
   const [sidebarOpen, setSidebarOpen] = usePersistentState('recims:sidebar-open', true);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, tenantConfig, loading } = useTenant();
+  const { user, tenantConfig, loading, phaseAccess, modulePhaseLimit } = useTenant();
+
+  const normalizedCustomPhaseLimit = Number.isFinite(Number(user?.ui_overrides?.maxAllowedPhase))
+    ? Math.min(Math.max(Math.floor(Number(user.ui_overrides.maxAllowedPhase)), 1), PHASE_LABELS.length)
+    : null;
+  const phaseLimit = Number.isFinite(normalizedCustomPhaseLimit)
+    ? normalizedCustomPhaseLimit
+    : modulePhaseLimit ?? Infinity;
+  const hidePhaseBranding = Boolean(user?.ui_overrides?.hidePhaseBranding);
+  const hideAccessBanner = Boolean(user?.ui_overrides?.hideAccessBanner);
+  const basePhaseLabel = formatPhaseLabel(phaseLimit);
+  const accessLevelLabel = user?.ui_overrides?.accessLevelLabel || (hidePhaseBranding ? 'Approved scope' : basePhaseLabel);
+  const phaseLimitLabel = accessLevelLabel || basePhaseLabel || 'Approved scope';
+  const accessCardTitle = hidePhaseBranding
+    ? user?.ui_overrides?.accessCardTitle || 'Access level'
+    : 'Phase access';
+  const accessCardDescription = hidePhaseBranding
+    ? user?.ui_overrides?.accessCardDescription || `Limited to ${phaseLimitLabel}.`
+    : `Limited to ${phaseLimitLabel}.`;
+  const showAccessBanner = phaseAccess?.isRestricted && !hideAccessBanner;
+
+  const isPhaseAllowed = React.useCallback(
+    (phaseLevel) => {
+      if (!Number.isFinite(phaseLimit) || phaseLimit <= 0) {
+        return true;
+      }
+      if (!Number.isFinite(phaseLevel)) {
+        return true;
+      }
+      return phaseLevel <= phaseLimit;
+    },
+    [phaseLimit]
+  );
+
+  const requiredPhase = getPagePhaseRequirement(currentPageName);
+  const canAccessPage = isPhaseAllowed(requiredPhase);
 
   const normalizedFeatures = React.useMemo(
     () => tenantConfig?.features ?? {},
@@ -68,26 +120,26 @@ function LayoutShell({ children, currentPageName }) {
   );
 
   const rawMenuItems = React.useMemo(() => ([
-    { name: 'Home', icon: LayoutDashboard, path: 'Home', color: 'text-green-600' },
-    { name: 'Dashboard', icon: LayoutDashboard, path: 'Dashboard', color: 'text-green-600' },
-    { name: 'Inbound Shipments', icon: TruckIcon, path: 'InboundShipments', color: 'text-blue-600' },
-    { name: 'Material Classification', icon: Package, path: 'MaterialClassification', color: 'text-purple-600' },
-    { name: 'Quality Control', icon: ClipboardCheck, path: 'QualityControl', color: 'text-orange-600', requiredFeatures: ['enable_qc_module', 'qc_module_enabled'] },
-    { name: 'Inventory', icon: Warehouse, path: 'InventoryManagement', color: 'text-teal-600', requiredFeatures: ['enable_inventory_module', 'inventory_module_enabled'] },
-    { name: 'Bins', icon: Box, path: 'BinManagement', color: 'text-emerald-600' },
-    { name: 'Zones', icon: Grid3x3, path: 'ZoneManagement', color: 'text-lime-600' },
-    { name: 'Sales Orders', icon: ShoppingCart, path: 'SalesOrderManagement', color: 'text-indigo-600' },
-    { name: 'Sales Activity AI', icon: BarChart3, path: 'AIInsightsModule', color: 'text-purple-600', requiredFeatures: ['enable_ai_insights', 'ai_insights_enabled'] },
-    { name: 'Purchase Orders', icon: FileText, path: 'PurchaseOrders', color: 'text-cyan-600', requiredFeatures: ['enable_po_module', 'po_module_enabled'] },
-    { name: 'Customers', icon: Users, path: 'CustomerManagement', color: 'text-pink-600' },
-    { name: 'Vendors', icon: Building2, path: 'VendorManagement', color: 'text-amber-600' },
-    { name: 'Reports', icon: BarChart3, path: 'Reports', color: 'text-red-600', requiredFeatures: ['enable_kpi_dashboard', 'kpi_dashboard_enabled'] },
-    { name: 'Settings', icon: Settings, path: 'Settings', color: 'text-gray-600' }
+    { name: 'Home', icon: LayoutDashboard, path: 'Home', color: 'text-green-600', phase: 1 },
+    { name: 'Dashboard', icon: LayoutDashboard, path: 'Dashboard', color: 'text-green-600', phase: 1 },
+    { name: 'Inbound Shipments', icon: TruckIcon, path: 'InboundShipments', color: 'text-blue-600', phase: 1 },
+    { name: 'Material Classification', icon: Package, path: 'MaterialClassification', color: 'text-purple-600', phase: 2 },
+    { name: 'Quality Control', icon: ClipboardCheck, path: 'QualityControl', color: 'text-orange-600', requiredFeatures: ['enable_qc_module', 'qc_module_enabled'], phase: 4 },
+    { name: 'Inventory', icon: Warehouse, path: 'InventoryManagement', color: 'text-teal-600', requiredFeatures: ['enable_inventory_module', 'inventory_module_enabled'], phase: 4 },
+    { name: 'Bins', icon: Box, path: 'BinManagement', color: 'text-emerald-600', phase: 2 },
+    { name: 'Zones', icon: Grid3x3, path: 'ZoneManagement', color: 'text-lime-600', phase: 2 },
+    { name: 'Sales Orders', icon: ShoppingCart, path: 'SalesOrderManagement', color: 'text-indigo-600', phase: 3 },
+    { name: 'Sales Activity AI', icon: BarChart3, path: 'AIInsightsModule', color: 'text-purple-600', requiredFeatures: ['enable_ai_insights', 'ai_insights_enabled'], phase: 6 },
+    { name: 'Purchase Orders', icon: FileText, path: 'PurchaseOrders', color: 'text-cyan-600', requiredFeatures: ['enable_po_module', 'po_module_enabled'], phase: 3 },
+    { name: 'Customers', icon: Users, path: 'CustomerManagement', color: 'text-pink-600', phase: 1 },
+    { name: 'Vendors', icon: Building2, path: 'VendorManagement', color: 'text-amber-600', phase: 1 },
+    { name: 'Reports', icon: BarChart3, path: 'Reports', color: 'text-red-600', requiredFeatures: ['enable_kpi_dashboard', 'kpi_dashboard_enabled'], phase: 5 },
+    { name: 'Settings', icon: Settings, path: 'Settings', color: 'text-gray-600', phase: 3 }
   ]), []);
 
   const menuItems = React.useMemo(
-    () => rawMenuItems.filter((item) => isFeatureEnabled(item.requiredFeatures)),
-    [rawMenuItems, isFeatureEnabled]
+    () => rawMenuItems.filter((item) => isFeatureEnabled(item.requiredFeatures) && isPhaseAllowed(item.phase ?? 1)),
+    [rawMenuItems, isFeatureEnabled, isPhaseAllowed]
   );
 
   const normalizedRole = typeof user?.role === 'string' ? user.role.toLowerCase() : '';
@@ -132,6 +184,12 @@ function LayoutShell({ children, currentPageName }) {
 
           {/* Navigation Menu */}
           <nav className="p-4 space-y-2 overflow-y-auto h-full">
+            {showAccessBanner && (
+              <div className={`rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 ${!sidebarOpen ? 'text-center' : ''}`}>
+                <p className="font-semibold text-sm">{accessCardTitle}</p>
+                <p>{accessCardDescription}</p>
+              </div>
+            )}
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = isActivePage(item.path);
@@ -229,7 +287,15 @@ function LayoutShell({ children, currentPageName }) {
             pt-4
           `}
         >
-          {children}
+          {canAccessPage ? (
+            children
+          ) : (
+            <PhaseRestrictionNotice
+              requiredPhase={requiredPhase}
+              scopeLabel={phaseLimitLabel}
+              hidePhaseBranding={hidePhaseBranding}
+            />
+          )}
         </main>
       </div>
 
@@ -243,3 +309,34 @@ function LayoutShell({ children, currentPageName }) {
     </div>
   );
 }
+
+LayoutShell.propTypes = {
+  children: PropTypes.node,
+  currentPageName: PropTypes.string,
+};
+
+function PhaseRestrictionNotice({ requiredPhase, scopeLabel, hidePhaseBranding }) {
+  const requiredLabel = hidePhaseBranding
+    ? `Level ${requiredPhase}`
+    : formatPhaseLabel(requiredPhase) || `PHASE ${requiredPhase}`;
+  const helpText = hidePhaseBranding
+    ? 'Contact your RecIMS administrator if you need access to additional capabilities.'
+    : 'Contact your RecIMS administrator if you need access to higher-phase capabilities.';
+  return (
+    <div className="p-6">
+      <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-6 text-amber-900">
+        <h2 className="text-xl font-semibold mb-2">Module locked</h2>
+        <p className="mb-2">
+          This workspace is limited to {scopeLabel || 'your approved scope'}. {requiredLabel} modules are not available for your account.
+        </p>
+        <p className="text-sm text-amber-800">{helpText}</p>
+      </div>
+    </div>
+  );
+}
+
+PhaseRestrictionNotice.propTypes = {
+  requiredPhase: PropTypes.number.isRequired,
+  phaseLimitLabel: PropTypes.string.isRequired,
+  hidePhaseBranding: PropTypes.bool,
+};

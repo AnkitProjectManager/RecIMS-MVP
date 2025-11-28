@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 import { recims } from "@/api/recimsClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -24,6 +25,8 @@ import { Badge } from "@/components/ui/badge";
 import { format, subDays, differenceInMinutes } from "date-fns";
 import { useTenant } from "@/components/TenantContext";
 import { getThemePalette, withAlpha } from "@/lib/theme";
+import { formatUSD } from "@/lib/utils";
+import { getPagePhaseRequirement } from "@/lib/phaseAccess";
 
 const parseDateSafe = (value) => {
   if (!value) return null;
@@ -36,7 +39,6 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState(null);
   const [debugInfo, setDebugInfo] = React.useState([]);
-  const queryClient = useQueryClient();
 
   const addDebugInfo = (message) => {
     setDebugInfo(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
@@ -162,7 +164,8 @@ export default function Dashboard() {
 // Separate component for the main dashboard content
 function DashboardContent({ user }) {
   const queryClient = useQueryClient();
-  const { tenantConfig, theme } = useTenant();
+  const { tenantConfig, theme, modulePhaseLimit } = useTenant();
+  const hideInventoryValueTile = Boolean(user?.ui_overrides?.hideInventoryValueTile);
   const [shiftTick, setShiftTick] = React.useState(Date.now());
   const palette = React.useMemo(() => getThemePalette(theme), [theme]);
   const dashboardBackgroundStyle = React.useMemo(
@@ -176,16 +179,8 @@ function DashboardContent({ user }) {
     [palette.primaryColor]
   );
   const heroTextColor = palette.heroTextColor || '#0F172A';
-  const heroTextStyle = React.useMemo(
-    () => ({ color: heroTextColor }),
-    [heroTextColor]
-  );
   const heroMutedTextStyle = React.useMemo(
     () => ({ color: withAlpha(heroTextColor, 0.78) }),
-    [heroTextColor]
-  );
-  const heroSubtleTextStyle = React.useMemo(
-    () => ({ color: withAlpha(heroTextColor, 0.62) }),
     [heroTextColor]
   );
   const themedSurfaces = React.useMemo(
@@ -199,7 +194,7 @@ function DashboardContent({ user }) {
     }),
     []
   );
-
+  
   const { data: activeShift } = useQuery({
     queryKey: ['activeShift', user?.email],
     queryFn: async () => {
@@ -320,7 +315,6 @@ function DashboardContent({ user }) {
     initialData: [],
   });
 
-  const poModuleEnabled = settings.find(s => s.setting_key === 'enable_po_module')?.setting_value === 'true';
   const binCapacityEnabled = settings.find(s => s.setting_key === 'enable_bin_capacity_management')?.setting_value === 'true';
 
   const availableInventory = inventory.filter(i => i.status === 'available');
@@ -357,7 +351,7 @@ function DashboardContent({ user }) {
         updated_date: new Date().toISOString()
       });
     },
-    onSuccess: (completedShift) => {
+    onSuccess: () => {
       queryClient.setQueryData(['activeShift', user?.email], null);
       queryClient.invalidateQueries({ queryKey: ['activeShift', user?.email] });
       queryClient.invalidateQueries({ queryKey: ['completedShiftsSummary', user?.email] });
@@ -427,62 +421,6 @@ function DashboardContent({ user }) {
   //     }).length
   //   : bins.filter(b => b.status === 'available' || b.status === 'empty').length;
   
-  const lowStockItems = inventory.filter(i =>
-    i.reorder_point && i.quantity_on_hand <= i.reorder_point
-  ).length;
-
-  const completedShipmentsToday = todayShipments.filter(s => s.status === 'completed');
-  let processedShipmentCount = 0;
-  const totalProcessingMinutes = completedShipmentsToday.reduce((sum, s) => {
-    const start = parseDateSafe(s.arrival_time || s.created_date);
-    const end = parseDateSafe(s.updated_date);
-    if (!start || !end) {
-      return sum;
-    }
-    processedShipmentCount += 1;
-    return sum + differenceInMinutes(end, start);
-  }, 0);
-  const avgProcessingTime = processedShipmentCount > 0
-    ? totalProcessingMinutes / processedShipmentCount
-    : 0;
-
-  const last30DaysQC = qcInspections.filter(qc => {
-    const qcDate = parseDateSafe(qc.inspection_date);
-    if (!qcDate) return false;
-    return qcDate >= subDays(new Date(), 30);
-  });
-  const qcPassRate = last30DaysQC.length > 0
-    ? (last30DaysQC.filter(qc => qc.overall_result === 'pass').length / last30DaysQC.length * 100).toFixed(1)
-    : 0;
-
-  const shipmentTrendData = [];
-  for (let i = 6; i >= 0; i--) {
-    const day = subDays(new Date(), i);
-    const dayShipments = last7DaysShipments.filter(s => {
-      const shipmentDate = parseDateSafe(s.created_date);
-      return shipmentDate ? shipmentDate.toDateString() === day.toDateString() : false;
-    });
-    shipmentTrendData.push({
-      date: format(day, 'MMM dd'),
-      shipments: dayShipments.length,
-      weight: dayShipments.reduce((acc, s) => acc + (s.net_weight || 0), 0)
-    });
-  }
-
-  const inventoryValueTrend = shipmentTrendData.map(d => ({
-    label: d.date,
-    value: parseFloat((d.weight * 2.5).toFixed(2))
-  }));
-
-  const qcPassRateTrend = [];
-  for (let i = 6; i >= 0; i--) {
-    const day = subDays(new Date(), i);
-    qcPassRateTrend.push({
-      label: format(day, 'MMM dd'),
-      value: parseFloat((Math.random() * 20 + 80).toFixed(1))
-    });
-  }
-
   React.useEffect(() => {
     if (!activeShift?.shift_start) {
       return undefined;
@@ -537,6 +475,14 @@ function DashboardContent({ user }) {
         return 'bg-gray-100 text-gray-700 border-gray-300';
     }
   };
+
+  const canAccessPage = React.useCallback((pageName) => {
+    const required = getPagePhaseRequirement(pageName);
+    if (!Number.isFinite(modulePhaseLimit)) {
+      return true;
+    }
+    return required <= modulePhaseLimit;
+  }, [modulePhaseLimit]);
 
   const getInventoryActionUrl = () => {
     if (tenantConfig?.features?.po_module_enabled) {
@@ -733,21 +679,26 @@ function DashboardContent({ user }) {
           </Card>
         </Link>
 
-        <Link to={createPageUrl("InventoryManagement")}>
-          <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
-                  <DollarSign className="w-6 h-6" style={accentTextStyle} />
+        {!hideInventoryValueTile && (
+          <Link to={createPageUrl("InventoryManagement")}>
+            <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-3 rounded-xl ${themedSurfaces.icon}`}>
+                    <DollarSign className="w-6 h-6" style={accentTextStyle} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-slate-900">{formatUSD(totalInventoryValue, {
+                      notation: 'compact',
+                      maximumFractionDigits: 1,
+                    })}</p>
+                    <p className="text-xs text-slate-600">Inventory Value</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">${(totalInventoryValue / 1000).toFixed(1)}K</p>
-                  <p className="text-xs text-slate-600">Inventory Value</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
+              </CardContent>
+            </Card>
+          </Link>
+        )}
 
         <Link to={createPageUrl("SalesOrderManagement")}>
           <Card className={`${themedSurfaces.base} transition-all cursor-pointer ${themedSurfaces.rounded}`}>
@@ -757,7 +708,10 @@ function DashboardContent({ user }) {
                   <TrendingUp className="w-6 h-6" style={accentTextStyle} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900">${(totalSalesYTD / 1000).toFixed(1)}K</p>
+                  <p className="text-2xl font-bold text-slate-900">{formatUSD(totalSalesYTD, {
+                    notation: 'compact',
+                    maximumFractionDigits: 1,
+                  })}</p>
                   <p className="text-xs text-slate-600">Sales YTD</p>
                 </div>
               </div>
@@ -791,12 +745,14 @@ function DashboardContent({ user }) {
                 <span className="text-sm font-semibold">{getInventoryActionLabel()}</span>
               </Button>
             </Link>
-            <Link to={createPageUrl("Reports")}>
-              <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
-                <BarChart3 className="w-6 h-6" />
-                <span className="text-sm font-semibold">Reports</span>
-              </Button>
-            </Link>
+            {canAccessPage('Reports') && (
+              <Link to={createPageUrl("Reports")}>
+                <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
+                  <BarChart3 className="w-6 h-6" />
+                  <span className="text-sm font-semibold">Reports</span>
+                </Button>
+              </Link>
+            )}
             <a href={recims.agents.getWhatsAppConnectURL('reports_assistant')} target="_blank" rel="noopener noreferrer">
               <Button className="w-full h-20 flex flex-col gap-2 tenant-action rounded-2xl">
                 <MessageCircle className="w-6 h-6" />
@@ -848,3 +804,14 @@ function DashboardContent({ user }) {
     </div>
   );
 }
+
+DashboardContent.propTypes = {
+  user: PropTypes.shape({
+    email: PropTypes.string.isRequired,
+    full_name: PropTypes.string,
+    tenant_id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    ui_overrides: PropTypes.shape({
+      hideInventoryValueTile: PropTypes.bool,
+    }),
+  }).isRequired,
+};

@@ -94,14 +94,15 @@ export default function NewShipment() {
   }, [suppliers, vendors]);
 
   const { data: containers = [] } = useQuery({
-    queryKey: ['containers'],
-    queryFn: () => recims.entities.Container.filter({ status: 'active' }),
-    initialData: [],
-  });
-
-  const { data: settings = [] } = useQuery({
-    queryKey: ['appSettings'],
-    queryFn: () => recims.entities.AppSettings.list(),
+    queryKey: ['containers', user?.tenant_id],
+    queryFn: async () => {
+      if (!user?.tenant_id) return [];
+      return await recims.entities.Container.filter({
+        status: 'active',
+        tenant_id: user.tenant_id
+      });
+    },
+    enabled: !!user?.tenant_id,
     initialData: [],
   });
 
@@ -124,22 +125,73 @@ export default function NewShipment() {
     initialData: [],
   });
 
+  const loadTypeOptions = React.useMemo(() => {
+    const tenantDefaults = Array.isArray(tenantConfig?.default_load_types)
+      ? tenantConfig.default_load_types
+      : [];
+    const categoryTypes = tenantCategories
+      .map((tc) => tc.load_type_mapping)
+      .filter((value) => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.toLowerCase());
+    const baseTypes = ['metal', 'plastic', 'mixed'];
+    const normalized = [...tenantDefaults, ...categoryTypes, ...baseTypes]
+      .map((type) => (typeof type === 'string' ? type.toLowerCase() : ''))
+      .filter(Boolean);
+    return Array.from(new Set(normalized));
+  }, [tenantConfig?.default_load_types, tenantCategories]);
+
+  React.useEffect(() => {
+    if (loadTypeOptions.length === 0) {
+      return;
+    }
+    const current = (formData.load_type || '').toLowerCase();
+    if (!loadTypeOptions.includes(current)) {
+      setFormData((prev) => ({ ...prev, load_type: loadTypeOptions[0] }));
+    }
+  }, [loadTypeOptions, formData.load_type]);
+
+  const formatLoadTypeLabel = (type) => {
+    if (!type) return '';
+    return type
+      .split('_')
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ');
+  };
+
   const photoUploadEnabled = tenantConfig?.features?.photo_upload_enabled || false;
 
   // Get categories from TenantCategory entity
   const availableCategories = React.useMemo(() => {
     if (tenantCategories.length === 0) return [];
-    
-    // Filter by current load_type
-    const filtered = tenantCategories.filter(tc => tc.load_type_mapping === formData.load_type);
-    return filtered.map(tc => tc.category_name);
+    const loadType = (formData.load_type || '').toLowerCase();
+    const filtered = tenantCategories.filter((tc) => {
+      const mapping = (tc.load_type_mapping || '').toLowerCase();
+      if (!loadType || loadType === 'mixed') {
+        return true;
+      }
+      return mapping === loadType;
+    });
+    const unique = new Set();
+    filtered.forEach((tc) => {
+      if (tc.category_name) {
+        unique.add(tc.category_name);
+      }
+    });
+    return Array.from(unique);
   }, [tenantCategories, formData.load_type]);
 
   // Get sub-categories from TenantCategory
   const availableSubCategories = React.useMemo(() => {
     if (!formData.product_category) return [];
-    const category = tenantCategories.find(tc => tc.category_name === formData.product_category);
-    return category?.sub_categories || [];
+    const normalizedCategory = formData.product_category.toLowerCase();
+    const matches = tenantCategories.filter(
+      (tc) => (tc.category_name || '').toLowerCase() === normalizedCategory
+    );
+    const unique = new Set();
+    matches.forEach((tc) => {
+      (tc.sub_categories || []).forEach((sub) => unique.add(sub));
+    });
+    return Array.from(unique);
   }, [tenantCategories, formData.product_category]);
 
   // Get product types based on sub-category
@@ -589,25 +641,18 @@ export default function NewShipment() {
                 <Select
                   value={formData.load_type}
                   onValueChange={(value) => handleChange('load_type', value)}
-                  disabled={tenantConfig?.default_load_types?.length === 1}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {tenantConfig?.default_load_types?.map(type => (
+                    {loadTypeOptions.map((type) => (
                       <SelectItem key={type} value={type}>
-                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                        {formatLoadTypeLabel(type)}
                       </SelectItem>
                     ))}
-                    <SelectItem value="mixed">Mixed</SelectItem>
                   </SelectContent>
                 </Select>
-                {tenantConfig?.default_load_types?.length === 1 && (
-                  <p className="text-xs" style={{ color: tenantConfig.primary_color }}>
-                    {tenantConfig.display_name}: {tenantConfig.default_load_types[0]} materials only
-                  </p>
-                )}
               </div>
 
               <div className="space-y-2 md:col-span-2">

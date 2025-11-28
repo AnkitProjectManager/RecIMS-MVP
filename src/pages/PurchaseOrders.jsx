@@ -40,7 +40,7 @@ import { Label } from "@/components/ui/label";
 
 export default function PurchaseOrders() {
   const navigate = useNavigate();
-  const { tenantConfig, user } = useTenant();
+  const { user } = useTenant();
   const [searchQuery, setSearchQuery] = useState('');
   
   // Filter states
@@ -99,7 +99,13 @@ export default function PurchaseOrders() {
     initialData: [],
   });
 
-  const poModuleEnabled = settings.find(s => s.setting_key === 'enable_po_module')?.setting_value === 'true';
+  const rawPoModuleEnabled = settings.find(s => s.setting_key === 'enable_po_module')?.setting_value === 'true';
+  const forcePoModule = Boolean(
+    user?.feature_overrides?.forcePurchaseOrders ||
+    user?.feature_overrides?.enable_po_module ||
+    user?.feature_overrides?.po_module_enabled
+  );
+  const poModuleEnabled = forcePoModule || rawPoModuleEnabled;
 
   // Calculate metrics
   const metrics = React.useMemo(() => {
@@ -217,20 +223,23 @@ export default function PurchaseOrders() {
       now.setHours(0,0,0,0); // Normalize to start of day
 
       switch(filterDateRange) {
-        case 'today':
+        case 'today': {
           if (orderDate.toDateString() !== now.toDateString()) return false;
           break;
-        case 'week':
+        }
+        case 'week': {
           const weekAgo = new Date(now);
           weekAgo.setDate(now.getDate() - 7);
           if (orderDate < weekAgo) return false;
           break;
-        case 'month':
+        }
+        case 'month': {
           const monthAgo = new Date(now);
           monthAgo.setDate(now.getDate() - 30);
           if (orderDate < monthAgo) return false;
           break;
-        case 'custom':
+        }
+        case 'custom': {
           if (customStartDate && customEndDate) {
             const start = new Date(customStartDate);
             start.setHours(0,0,0,0);
@@ -238,6 +247,9 @@ export default function PurchaseOrders() {
             end.setHours(23,59,59,999); // Set to end of day for inclusive comparison
             if (orderDate < start || orderDate > end) return false;
           }
+          break;
+        }
+        default:
           break;
       }
     }
@@ -262,25 +274,6 @@ export default function PurchaseOrders() {
   const getItemCount = (poId) => {
     return purchaseOrderItems.filter(item => item.po_id === poId).length;
   };
-
-  if (!poModuleEnabled) {
-    return (
-      <div className="p-4 md:p-8 max-w-4xl mx-auto">
-        <TenantHeader />
-        <Alert>
-          <AlertDescription>
-            Purchase Order module is not enabled. Please enable it in Super Admin settings.
-          </AlertDescription>
-        </Alert>
-        <Link to={createPageUrl("Dashboard")} className="mt-4 inline-block">
-          <Button variant="outline">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </Button>
-        </Link>
-      </div>
-    );
-  }
 
   if (!poModuleEnabled) {
     return (

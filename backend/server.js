@@ -15,6 +15,10 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+const CLNENV_TENANT_ID = 'TNT-002';
+const CLNENV_USER_EMAIL = (process.env.CLNENV_USER_EMAIL || 'admin@clnenv.com').toLowerCase();
+const CLNENV_USER_PASSWORD = process.env.CLNENV_USER_PASSWORD || 'phase3only!';
+const CLNENV_USER_NAME = process.env.CLNENV_USER_NAME || 'CLN Env Restricted Admin';
 
 // Initialize SQLite database
 const db = new Database(process.env.DATABASE_PATH || join(__dirname, 'recims.db'));
@@ -77,6 +81,16 @@ function initDatabase() {
     }
   };
 
+  const ensureUserColumn = (column, type) => {
+    try {
+      db.prepare(`ALTER TABLE users ADD COLUMN ${column} ${type}`).run();
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        throw error;
+      }
+    }
+  };
+
   ensureColumn('tenant_id', 'TEXT');
   ensureColumn('display_name', 'TEXT');
   ensureColumn('region', 'TEXT');
@@ -110,11 +124,36 @@ function initDatabase() {
   ensureColumn('api_keys_json', 'TEXT');
   ensureColumn('created_date', 'DATETIME');
   ensureColumn('updated_date', 'DATETIME');
+  ensureUserColumn('phase_limit', 'TEXT');
 
   // Create default tenant and admin user if not exists
   const tenant = db.prepare('SELECT id FROM tenants WHERE id = 1').get();
   if (!tenant) {
     db.prepare('INSERT INTO tenants (id, name) VALUES (1, ?)').run('Default Tenant');
+  }
+
+  const ctMetalsTenant = db.prepare('SELECT id FROM tenants WHERE tenant_id = ?').get(CLNENV_TENANT_ID);
+  if (!ctMetalsTenant) {
+    db.prepare(`
+      INSERT INTO tenants (
+        name,
+        tenant_id,
+        display_name,
+        region,
+        status,
+        branding_primary_color,
+        branding_secondary_color,
+        created_date,
+        updated_date
+      ) VALUES (@name, @tenant_id, @display_name, @region, 'ACTIVE', @primary_color, @secondary_color, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run({
+      name: 'Connecticut Metals',
+      tenant_id: CLNENV_TENANT_ID,
+      display_name: 'CT Metals',
+      region: 'Northeast',
+      primary_color: '#F97316',
+      secondary_color: '#F43F5E'
+    });
   }
 
   db.prepare(`
@@ -168,6 +207,30 @@ function initDatabase() {
     WHERE email = 'admin@recims.com' AND tenant_id = '1'
   `).run();
 
+  const restrictedUser = db.prepare('SELECT id FROM users WHERE email = ?').get(CLNENV_USER_EMAIL);
+  if (!restrictedUser) {
+    const hashed = bcrypt.hashSync(CLNENV_USER_PASSWORD, 10);
+    db.prepare(`
+      INSERT INTO users (email, password, full_name, tenant_id, role, phase_limit)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      CLNENV_USER_EMAIL,
+      hashed,
+      CLNENV_USER_NAME,
+      CLNENV_TENANT_ID,
+      'phase3_admin',
+      'PHASE III'
+    );
+  } else {
+    db.prepare(`
+      UPDATE users
+      SET tenant_id = ?,
+          role = 'phase3_admin',
+          phase_limit = COALESCE(phase_limit, 'PHASE III')
+      WHERE email = ?
+    `).run(CLNENV_TENANT_ID, CLNENV_USER_EMAIL);
+  }
+
   console.log('✅ Database initialized');
 }
 
@@ -203,7 +266,7 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, tenant_id: user.tenant_id, role: user.role },
+      { id: user.id, email: user.email, tenant_id: user.tenant_id, role: user.role, phase_limit: user.phase_limit },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -215,7 +278,8 @@ app.post('/api/auth/login', (req, res) => {
         email: user.email,
         full_name: user.full_name,
         tenant_id: user.tenant_id,
-        role: user.role
+        role: user.role,
+        phase_limit: user.phase_limit
       }
     });
   } catch (error) {
@@ -227,7 +291,7 @@ app.post('/api/auth/login', (req, res) => {
 // Get current user
 app.get('/api/auth/me', authenticateToken, (req, res) => {
   try {
-    const user = db.prepare('SELECT id, email, full_name, tenant_id, role FROM users WHERE id = ?')
+    const user = db.prepare('SELECT id, email, full_name, tenant_id, role, phase_limit FROM users WHERE id = ?')
       .get(req.user.id);
     
     if (!user) {
@@ -265,11 +329,11 @@ app.put('/api/auth/me', authenticateToken, (req, res) => {
       `UPDATE users SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
     ).run(...Object.values(updates), req.user.id);
 
-    const user = db.prepare('SELECT id, email, full_name, tenant_id, role FROM users WHERE id = ?')
+    const user = db.prepare('SELECT id, email, full_name, tenant_id, role, phase_limit FROM users WHERE id = ?')
       .get(req.user.id);
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, tenant_id: user.tenant_id, role: user.role },
+      { id: user.id, email: user.email, tenant_id: user.tenant_id, role: user.role, phase_limit: user.phase_limit },
       JWT_SECRET,
       { expiresIn: '24h' }
     );

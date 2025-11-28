@@ -12,6 +12,25 @@ const DEFAULT_TENANT_CONFIG = {
   branding_secondary_color: '#005247',
 };
 
+const PHASE_LABELS = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+
+const FEATURE_PHASE_MAP = {
+  enable_po_module: 3,
+  enable_qc_module: 4,
+  enable_inventory_module: 3,
+  enable_bin_capacity_management: 3,
+  enable_ai_insights: 6,
+  enable_kpi_dashboard: 5,
+  enable_photo_upload_inbound: 2,
+  enable_photo_upload_classification: 2,
+  enable_stock_transfer: 4,
+  enable_email_automation: 4,
+  enable_picking_list: 3,
+  enable_scale_integration: 4,
+  enable_offline_mode: 3,
+  enable_product_images: 5,
+};
+
 const HEX_COLOR_REGEX = /^#?([0-9a-f]{6})$/i;
 const HERO_TEXT_LIGHT = '#FFFFFF';
 const HERO_TEXT_DARK = '#0F172A';
@@ -99,6 +118,74 @@ const deriveHeroTextColor = (primaryColor, secondaryColor) => {
   const secondaryLum = getRelativeLuminance(secondaryColor);
   const averageLum = (primaryLum + secondaryLum) / 2;
   return averageLum > 0.6 ? HERO_TEXT_DARK : HERO_TEXT_LIGHT;
+};
+
+const clampPhaseValue = (value) => {
+  if (!Number.isFinite(value)) {
+    return value;
+  }
+  return Math.min(Math.max(Math.floor(value), 1), PHASE_LABELS.length);
+};
+
+const formatPhaseLabel = (phaseNumber) => {
+  if (!Number.isFinite(phaseNumber)) {
+    return null;
+  }
+  const clamped = clampPhaseValue(phaseNumber) || 1;
+  const roman = PHASE_LABELS[clamped - 1] || PHASE_LABELS[0];
+  return `PHASE ${roman}`;
+};
+
+const limitFeaturesByPhase = (features, phaseAccess, exceptions = []) => {
+  if (!features || typeof features !== 'object') {
+    return features;
+  }
+
+  const maxPhase = phaseAccess?.maxPhase;
+  if (!Number.isFinite(maxPhase)) {
+    return features;
+  }
+
+  const exceptionSet = new Set(
+    Array.isArray(exceptions)
+      ? exceptions.map((key) => String(key))
+      : []
+  );
+
+  const gated = { ...features };
+  const disableKey = (key) => {
+    if (!key) return;
+    const normalizedKey = String(key);
+    if (exceptionSet.has(normalizedKey)) {
+      return;
+    }
+    if (normalizedKey in gated) {
+      gated[normalizedKey] = false;
+    }
+  };
+
+  Object.entries(FEATURE_PHASE_MAP).forEach(([key, phaseValue]) => {
+    if (phaseValue > maxPhase && key in gated) {
+      disableKey(key);
+      const aliases = FEATURE_ALIAS_MAP[key];
+      if (aliases) {
+        const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+        aliasList.forEach((aliasKey) => disableKey(aliasKey));
+      }
+    }
+  });
+  return gated;
+};
+
+const applyFeatureOverrides = (features, overrides) => {
+  if (!features || typeof features !== 'object' || !overrides || typeof overrides !== 'object') {
+    return features;
+  }
+  const next = { ...features };
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = value;
+  });
+  return next;
 };
 
 const STORAGE_KEYS = {
@@ -267,6 +354,43 @@ export function TenantProvider({ children }) {
     staleTime: 60_000,
   });
 
+  const restrictionsMaxPhase = user?.restrictions?.maxPhase;
+  const disablePhaseRestriction = Boolean(user?.ui_overrides?.disablePhaseRestriction);
+  const manualPhaseLimit = Number.isFinite(Number(user?.ui_overrides?.maxAllowedPhase))
+    ? clampPhaseValue(Number(user.ui_overrides.maxAllowedPhase))
+    : null;
+  const phaseExemptFeatures = React.useMemo(() => (
+    Array.isArray(user?.ui_overrides?.phaseExemptFeatures)
+      ? user.ui_overrides.phaseExemptFeatures.map((key) => String(key))
+      : []
+  ), [user?.ui_overrides?.phaseExemptFeatures]);
+
+  const phaseAccess = React.useMemo(() => {
+    if (disablePhaseRestriction) {
+      return {
+        maxPhase: Infinity,
+        label: user?.ui_overrides?.accessLevelLabel || null,
+        isRestricted: false,
+      };
+    }
+    const directPhase = user?.phase_access?.maxPhase;
+    const restrictedPhase = typeof restrictionsMaxPhase === 'number' ? restrictionsMaxPhase : null;
+    const candidate = typeof directPhase === 'number' ? directPhase : restrictedPhase;
+    if (!Number.isFinite(candidate)) {
+      return {
+        maxPhase: Infinity,
+        label: null,
+        isRestricted: false,
+      };
+    }
+    const clamped = clampPhaseValue(candidate);
+    return {
+      maxPhase: clamped,
+      label: user?.phase_access?.label || formatPhaseLabel(clamped),
+      isRestricted: true,
+    };
+  }, [disablePhaseRestriction, user?.phase_access?.label, user?.phase_access?.maxPhase, user?.ui_overrides?.accessLevelLabel, restrictionsMaxPhase]);
+
   const tenantKey = useMemo(() => resolveTenantKey(user?.tenant_id), [user?.tenant_id]);
 
   const {
@@ -325,6 +449,46 @@ export function TenantProvider({ children }) {
     [tenant?.features, appSettings]
   );
 
+  const mergedFeaturesWithOverrides = React.useMemo(
+    () => applyFeatureOverrides(mergedFeatures, user?.feature_overrides),
+    [mergedFeatures, user?.feature_overrides]
+  );
+
+  const featureFlagsWithOverrides = React.useMemo(
+    () => applyFeatureOverrides(featureFlags, user?.feature_overrides),
+    [featureFlags, user?.feature_overrides]
+  );
+
+  const gatingPhaseAccess = React.useMemo(() => {
+    if (disablePhaseRestriction) {
+      if (Number.isFinite(manualPhaseLimit)) {
+        return { maxPhase: manualPhaseLimit };
+      }
+      return null;
+    }
+    return phaseAccess;
+  }, [disablePhaseRestriction, manualPhaseLimit, phaseAccess]);
+
+  const gatedMergedFeatures = React.useMemo(
+    () => (gatingPhaseAccess ? limitFeaturesByPhase(mergedFeaturesWithOverrides, gatingPhaseAccess, phaseExemptFeatures) : mergedFeaturesWithOverrides),
+    [mergedFeaturesWithOverrides, gatingPhaseAccess, phaseExemptFeatures]
+  );
+
+  const gatedFeatureFlags = React.useMemo(
+    () => (gatingPhaseAccess ? limitFeaturesByPhase(featureFlagsWithOverrides, gatingPhaseAccess, phaseExemptFeatures) : featureFlagsWithOverrides),
+    [featureFlagsWithOverrides, gatingPhaseAccess, phaseExemptFeatures]
+  );
+
+  const modulePhaseLimit = React.useMemo(() => {
+    if (Number.isFinite(manualPhaseLimit)) {
+      return manualPhaseLimit;
+    }
+    if (Number.isFinite(phaseAccess?.maxPhase)) {
+      return phaseAccess.maxPhase;
+    }
+    return Infinity;
+  }, [manualPhaseLimit, phaseAccess?.maxPhase]);
+
   const tenantConfig = useMemo(() => {
     const baseTenant = tenant ?? DEFAULT_TENANT_CONFIG;
     const primaryColor = normalizeHexColor(
@@ -341,9 +505,9 @@ export function TenantProvider({ children }) {
       ...baseTenant,
       branding_primary_color: primaryColor,
       branding_secondary_color: secondaryColor,
-      features: mergedFeatures,
+      features: gatedMergedFeatures,
     };
-  }, [tenant, mergedFeatures]);
+  }, [tenant, gatedMergedFeatures]);
 
   const theme = useMemo(() => {
     const primaryColor = tenantConfig.branding_primary_color || DEFAULT_TENANT_CONFIG.branding_primary_color;
@@ -376,10 +540,12 @@ export function TenantProvider({ children }) {
       loading,
       error,
       refreshTenant,
-      featureFlags,
+      featureFlags: gatedFeatureFlags,
+      phaseAccess,
+      modulePhaseLimit,
       theme,
     };
-  }, [tenantConfig, tenantKey, queryClient, user, loading, error, featureFlags, theme]);
+  }, [tenantConfig, tenantKey, queryClient, user, loading, error, gatedFeatureFlags, theme, phaseAccess, modulePhaseLimit]);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') return;
