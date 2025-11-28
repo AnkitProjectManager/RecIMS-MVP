@@ -418,6 +418,12 @@ function blobToDataUrl(blob) {
 // Token management
 let authToken = storage.getItem('recims_token') || null;
 
+const isDemoAuthToken = (token) => typeof token === 'string' && token.startsWith(DEMO_TOKEN_PREFIX);
+
+function hasValidAuthToken() {
+  return Boolean(authToken) && !isDemoAuthToken(authToken);
+}
+
 function setToken(token) {
   authToken = token;
   if (token) {
@@ -524,6 +530,22 @@ const auth = {
   },
 
   async me() {
+    const resolveOfflineUser = () => {
+      const cached = readCachedUser();
+      if (cached) {
+        ensureDemoToken(getStoredToken());
+        return cached;
+      }
+      const demoUser = buildDemoUser();
+      persistCachedUser(demoUser);
+      ensureDemoToken(getStoredToken());
+      return demoUser;
+    };
+
+    if (!hasValidAuthToken()) {
+      return resolveOfflineUser();
+    }
+
     try {
       const payload = await fetchAPI('/auth/me');
       const normalizedUser = payload?.user ?? payload ?? null;
@@ -537,15 +559,7 @@ const auth = {
       throw new Error('No user payload returned from /auth/me');
     } catch (error) {
       console.warn('[recims] auth.me failed, using cached or demo user', error);
-      const cached = readCachedUser();
-      if (cached) {
-        ensureDemoToken(getStoredToken());
-        return cached;
-      }
-      const demoUser = buildDemoUser();
-      persistCachedUser(demoUser);
-      ensureDemoToken(getStoredToken());
-      return demoUser;
+      return resolveOfflineUser();
     }
   },
 
@@ -634,6 +648,10 @@ function createEntityAPI(entityName) {
 
   return {
     async list(orderBy, limit) {
+      if (!hasValidAuthToken()) {
+        const fallback = sortEntities(readFallbackList(entityName), orderBy);
+        return limit ? fallback.slice(0, limit) : fallback;
+      }
       try {
         const entities = await fetchAPI(`/entities/${entityName}`);
         const normalized = Array.isArray(entities) ? entities : [];
@@ -667,6 +685,15 @@ function createEntityAPI(entityName) {
     },
 
     async get(id) {
+      if (!hasValidAuthToken()) {
+        const fallback = readFallbackList(entityName).find((item) => String(item.id) === String(id));
+        if (fallback) {
+          return { ...fallback };
+        }
+        const offlineError = new Error('Offline mode: record not available locally');
+        offlineError.status = 404;
+        throw offlineError;
+      }
       try {
         const entity = await fetchAPI(`/entities/${entityName}/${id}`);
         if (entity && typeof entity === 'object' && !Array.isArray(entity)) {
@@ -684,6 +711,9 @@ function createEntityAPI(entityName) {
     },
 
     async create(data) {
+      if (!hasValidAuthToken()) {
+        return upsertFallbackRecord(entityName, { ...data });
+      }
       try {
         const created = await fetchAPI(`/entities/${entityName}`, {
           method: 'POST',
@@ -702,6 +732,9 @@ function createEntityAPI(entityName) {
     },
 
     async update(id, data) {
+      if (!hasValidAuthToken()) {
+        return upsertFallbackRecord(entityName, { ...data, id });
+      }
       try {
         const payload = await fetchAPI(`/entities/${entityName}/${id}`, {
           method: 'PUT',
@@ -719,6 +752,10 @@ function createEntityAPI(entityName) {
     },
 
     async delete(id) {
+      if (!hasValidAuthToken()) {
+        removeFallbackRecord(entityName, id);
+        return id;
+      }
       try {
         const result = await fetchAPI(`/entities/${entityName}/${id}`, {
           method: 'DELETE',

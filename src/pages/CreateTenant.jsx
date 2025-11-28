@@ -223,8 +223,12 @@ export default function CreateTenant() {
     }
 
     // Check for duplicate tenant name (case-insensitive)
-    const upperCaseName = formData.name.toUpperCase();
-    const duplicateName = allTenants.find(t => t.name.toUpperCase() === upperCaseName);
+    const upperCaseName = formData.name?.toUpperCase?.() || '';
+    const duplicateName = allTenants.find(t => {
+      const tenantName = t?.name?.toUpperCase?.();
+      if (!tenantName || !upperCaseName) return false;
+      return tenantName === upperCaseName;
+    });
     
     if (duplicateName) {
       setError(`A tenant with the name "${duplicateName.name}" already exists. Please choose a different name.`);
@@ -234,7 +238,8 @@ export default function CreateTenant() {
     // Convert name to UPPER CASE before saving
     const dataToSave = {
       ...formData,
-      name: upperCaseName
+      name: upperCaseName || formData.name || '',
+      display_name: formData.display_name || formData.name || ''
     };
 
     createTenantMutation.mutate(dataToSave);

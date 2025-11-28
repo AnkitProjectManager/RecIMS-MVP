@@ -1,19 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { loginAsAdmin, navigateToTenantConsole, logout } from './utils';
 
 test.describe('Tenant management workflows', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }: { page: Page }) => {
     await loginAsAdmin(page);
   });
 
-  test.afterEach(async ({ page }) => {
+  test.afterEach(async ({ page }: { page: Page }) => {
     const logoutButtonCount = await page.getByRole('button', { name: /logout/i }).count();
     if (logoutButtonCount > 0) {
       await logout(page);
     }
   });
 
-  test('super admin can create and update a tenant', async ({ page }) => {
+  test('super admin can create and update a tenant', async ({ page }: { page: Page }) => {
   await navigateToTenantConsole(page);
 
   const createTenantLink = page.getByRole('link', { name: /create tenant/i });

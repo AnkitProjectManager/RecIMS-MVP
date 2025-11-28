@@ -25,6 +25,12 @@ import { format, subDays, differenceInMinutes } from "date-fns";
 import { useTenant } from "@/components/TenantContext";
 import { getThemePalette, withAlpha } from "@/lib/theme";
 
+const parseDateSafe = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 export default function Dashboard() {
   const [user, setUser] = React.useState(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -213,7 +219,10 @@ function DashboardContent({ user }) {
     queryFn: async () => {
       const shipments = await recims.entities.InboundShipment.list('-created_date', 50);
       const today = new Date().toDateString();
-      return shipments.filter(s => new Date(s.created_date).toDateString() === today);
+      return shipments.filter((s) => {
+        const shipmentDate = parseDateSafe(s.created_date);
+        return shipmentDate ? shipmentDate.toDateString() === today : false;
+      });
     },
     initialData: [],
   });
@@ -223,7 +232,10 @@ function DashboardContent({ user }) {
     queryFn: async () => {
       const shipments = await recims.entities.InboundShipment.list('-created_date', 200);
       const sevenDaysAgo = subDays(new Date(), 7);
-      return shipments.filter(s => new Date(s.created_date) >= sevenDaysAgo);
+      return shipments.filter((s) => {
+        const shipmentDate = parseDateSafe(s.created_date);
+        return shipmentDate ? shipmentDate >= sevenDaysAgo : false;
+      });
     },
     initialData: [],
   });
@@ -241,9 +253,11 @@ function DashboardContent({ user }) {
       }, '-created_date', 10);
       
       // Combine and sort
-      return [...pending, ...arrived].sort((a, b) => 
-        new Date(b.created_date).getTime() - new Date(a.created_date).getTime()
-      );
+      return [...pending, ...arrived].sort((a, b) => {
+        const dateB = parseDateSafe(b.created_date)?.getTime() ?? 0;
+        const dateA = parseDateSafe(a.created_date)?.getTime() ?? 0;
+        return dateB - dateA;
+      });
     },
     initialData: [],
   });
@@ -418,16 +432,23 @@ function DashboardContent({ user }) {
   ).length;
 
   const completedShipmentsToday = todayShipments.filter(s => s.status === 'completed');
-  const avgProcessingTime = completedShipmentsToday.length > 0
-    ? completedShipmentsToday.reduce((sum, s) => {
-        const start = new Date(s.arrival_time || s.created_date);
-        const end = new Date(s.updated_date);
-        return sum + differenceInMinutes(end, start);
-      }, 0) / completedShipmentsToday.length
+  let processedShipmentCount = 0;
+  const totalProcessingMinutes = completedShipmentsToday.reduce((sum, s) => {
+    const start = parseDateSafe(s.arrival_time || s.created_date);
+    const end = parseDateSafe(s.updated_date);
+    if (!start || !end) {
+      return sum;
+    }
+    processedShipmentCount += 1;
+    return sum + differenceInMinutes(end, start);
+  }, 0);
+  const avgProcessingTime = processedShipmentCount > 0
+    ? totalProcessingMinutes / processedShipmentCount
     : 0;
 
   const last30DaysQC = qcInspections.filter(qc => {
-    const qcDate = new Date(qc.inspection_date);
+    const qcDate = parseDateSafe(qc.inspection_date);
+    if (!qcDate) return false;
     return qcDate >= subDays(new Date(), 30);
   });
   const qcPassRate = last30DaysQC.length > 0
@@ -438,8 +459,8 @@ function DashboardContent({ user }) {
   for (let i = 6; i >= 0; i--) {
     const day = subDays(new Date(), i);
     const dayShipments = last7DaysShipments.filter(s => {
-      const shipmentDate = new Date(s.created_date);
-      return shipmentDate.toDateString() === day.toDateString();
+      const shipmentDate = parseDateSafe(s.created_date);
+      return shipmentDate ? shipmentDate.toDateString() === day.toDateString() : false;
     });
     shipmentTrendData.push({
       date: format(day, 'MMM dd'),
@@ -479,7 +500,9 @@ function DashboardContent({ user }) {
   const getShiftDuration = React.useCallback(() => {
     if (!activeShift?.shift_start) return '00:00';
 
-    const start = new Date(activeShift.shift_start).getTime();
+    const startDate = parseDateSafe(activeShift.shift_start);
+    if (!startDate) return '00:00';
+    const start = startDate.getTime();
     const now = shiftTick;
     const diffMs = Math.max(0, now - start);
     const totalSeconds = Math.floor(diffMs / 1000);
@@ -492,6 +515,10 @@ function DashboardContent({ user }) {
     const seconds = (totalSeconds % 60).toString().padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
   }, [activeShift, shiftTick]);
+
+  const activeShiftStartDate = React.useMemo(() => {
+    return parseDateSafe(activeShift?.shift_start);
+  }, [activeShift?.shift_start]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -529,9 +556,9 @@ function DashboardContent({ user }) {
 
   const totalCompletedMinutes = React.useMemo(() => {
     return completedShifts.reduce((total, shift) => {
-      const start = new Date(shift.shift_start);
-      const end = new Date(shift.shift_end);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      const start = parseDateSafe(shift.shift_start);
+      const end = parseDateSafe(shift.shift_end);
+      if (!start || !end) {
         return total;
       }
       const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
@@ -550,9 +577,9 @@ function DashboardContent({ user }) {
 
   const lastShiftDuration = React.useMemo(() => {
     if (!lastCompletedShift) return null;
-    const start = new Date(lastCompletedShift.shift_start);
-    const end = new Date(lastCompletedShift.shift_end);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const start = parseDateSafe(lastCompletedShift.shift_start);
+    const end = parseDateSafe(lastCompletedShift.shift_end);
+    if (!start || !end) {
       return null;
     }
     const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
@@ -561,8 +588,8 @@ function DashboardContent({ user }) {
 
   const lastShiftEndedAt = React.useMemo(() => {
     if (!lastCompletedShift?.shift_end) return null;
-    const end = new Date(lastCompletedShift.shift_end);
-    if (Number.isNaN(end.getTime())) return null;
+    const end = parseDateSafe(lastCompletedShift.shift_end);
+    if (!end) return null;
     return format(end, 'MMM d, h:mm a');
   }, [lastCompletedShift]);
 
@@ -590,7 +617,7 @@ function DashboardContent({ user }) {
                     <Clock className="w-4 h-4" />
                     <span>Duration: {getShiftDuration()}</span>
                   </div>
-                  <div>Started: {format(new Date(activeShift.shift_start), 'h:mm a')}</div>
+                  <div>Started: {activeShiftStartDate ? format(activeShiftStartDate, 'h:mm a') : 'Unknown'}</div>
                 </div>
               )}
               {user?.email && (
